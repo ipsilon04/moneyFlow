@@ -493,7 +493,7 @@
         }
         .fab {
             position: fixed;
-            bottom: 80px;
+            bottom: 95px;
             right: 20px;
             width: 54px;
             height: 54px;
@@ -617,7 +617,7 @@
                 border-radius: var(--radius-sm);
             }
             .fab {
-                bottom: 80px;
+                bottom: 95px;
                 right: 16px;
             }
             .mobile-more-menu {
@@ -627,7 +627,6 @@
             .stat-row-two {
                 grid-template-columns: 1fr;
             }
-            /* Закрашиваем щель под нижним меню */
             body::after {
                 content: '';
                 position: fixed;
@@ -791,10 +790,10 @@
         <button class="nav-item" data-tab="accounts"><span class="icon">💳</span>Счета</button>
         <button class="nav-item" data-tab="transactions"><span class="icon">📋</span>Транзакции</button>
         <button class="nav-item" data-tab="stats"><span class="icon">📈</span>Статистика</button>
-        <button class="nav-item" data-tab="budgets"><span class="icon">🎯</span>Бюджеты</button>
         <button class="nav-item" id="mobileMoreBtn"><span class="icon">⚙️</span>Ещё</button>
     </nav>
     <div class="mobile-more-menu" id="mobileMoreMenu">
+        <button class="nav-item" id="mobileBudgetsBtn"><span class="icon">🎯</span> Бюджеты</button>
         <button class="nav-item" id="mobileThemeToggle"><span class="icon">🌓</span> Тема</button>
         <button class="nav-item" id="mobileExportBtn"><span class="icon">📥</span> Экспорт CSV</button>
         <button class="nav-item" id="mobileImportBtn"><span class="icon">📤</span> Импорт CSV</button>
@@ -1963,6 +1962,7 @@
             function hideMobileMoreMenu() { mobileMoreMenu.style.display = 'none'; }
             mobileMoreBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMobileMoreMenu(); });
             document.addEventListener('click', (event) => { if (!mobileMoreMenu.contains(event.target) && event.target !== mobileMoreBtn) hideMobileMoreMenu(); });
+            document.getElementById('mobileBudgetsBtn').addEventListener('click', () => { switchTab('budgets'); hideMobileMoreMenu(); });
             document.getElementById('archiveNavBtn').addEventListener('click', showArchiveModal);
             document.getElementById('mobileArchiveBtn').addEventListener('click', () => { showArchiveModal(); hideMobileMoreMenu(); });
 
