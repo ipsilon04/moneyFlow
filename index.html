@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MoneyFlow — Учёт доходов и расходов</title>
     
     <!-- PWA meta tags -->
@@ -13,7 +13,8 @@
     
     <link rel="manifest" id="manifestPlaceholder">
     
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+    </script>
     
     <style>
         :root {
@@ -55,8 +56,6 @@
             min-height: 100vh;
             transition: background var(--transition), color var(--transition);
             -webkit-tap-highlight-color: transparent;
-            user-select: none;
-            -webkit-user-select: none;
         }
         .app-container {
             display: flex;
