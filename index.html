@@ -4,17 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MoneyFlow — Учёт доходов и расходов</title>
-    
-    <!-- PWA meta tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="MoneyFlow">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
-    
-    <link rel="manifest" id="manifestPlaceholder">
-    
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+    </script>
     <style>
         :root {
             --bg: #f5f6fa;
@@ -330,8 +321,12 @@
             backdrop-filter: blur(2px);
         }
         @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
         }
         .modal {
             background: var(--surface);
@@ -346,8 +341,14 @@
             border: 1px solid var(--border);
         }
         @keyframes slideUp {
-            from { transform: translateY(30px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
+            from {
+                transform: translateY(30px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
         }
         .modal h2 {
             margin-bottom: 18px;
@@ -796,95 +797,41 @@
     </div>
     <script>
         (function() {
-            // ---------- PWA: динамический манифест и service worker ----------
-            if ('serviceWorker' in navigator) {
-                // Устанавливаем манифест через Blob URL
-                const manifest = {
-                    name: "MoneyFlow",
-                    short_name: "MoneyFlow",
-                    start_url: ".",
-                    display: "standalone",
-                    background_color: "#f5f6fa",
-                    theme_color: "#6c5ce7",
-                    icons: [
-                        {
-                            src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>",
-                            sizes: "100x100",
-                            type: "image/svg+xml"
-                        },
-                        {
-                            src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>",
-                            sizes: "512x512",
-                            type: "image/svg+xml",
-                            purpose: "any maskable"
-                        }
-                    ]
-                };
-                const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-                const manifestURL = URL.createObjectURL(manifestBlob);
-                document.getElementById('manifestPlaceholder').href = manifestURL;
-
-                // Service worker code (строкой)
-                const swCode = `
-                    const CACHE_NAME = 'moneyflow-v1';
-                    const ASSETS_TO_CACHE = [
-                        self.location.href,
-                        'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'
-                    ];
-
-                    self.addEventListener('install', (event) => {
-                        event.waitUntil(
-                            caches.open(CACHE_NAME).then((cache) => {
-                                return cache.addAll(ASSETS_TO_CACHE);
-                            })
-                        );
-                    });
-
-                    self.addEventListener('activate', (event) => {
-                        event.waitUntil(
-                            caches.keys().then((cacheNames) => {
-                                return Promise.all(
-                                    cacheNames.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name))
-                                );
-                            })
-                        );
-                    });
-
-                    self.addEventListener('fetch', (event) => {
-                        if (event.request.method !== 'GET') return;
-                        event.respondWith(
-                            caches.match(event.request).then((cachedResponse) => {
-                                return cachedResponse || fetch(event.request);
-                            })
-                        );
-                    });
-                `;
-
-                const swBlob = new Blob([swCode], { type: 'application/javascript' });
-                const swURL = URL.createObjectURL(swBlob);
-
-                window.addEventListener('load', async () => {
-                    try {
-                        const registration = await navigator.serviceWorker.register(swURL);
-                        console.log('Service Worker зарегистрирован:', registration.scope);
-                    } catch (error) {
-                        console.warn('Ошибка регистрации Service Worker:', error);
+            const isTelegram = window.Telegram && Telegram.WebApp;
+            let tgCloud = null;
+            if (isTelegram) {
+                const tg = Telegram.WebApp;
+                tg.ready();
+                tg.expand();
+                if (tg.colorScheme === 'dark') document.body.classList.add('dark');
+                tg.onEvent('themeChanged', () => {
+                    document.body.classList.toggle('dark', tg.colorScheme === 'dark');
+                });
+                tgCloud = tg.CloudStorage;
+                tg.onEvent('viewportChanged', async ({ isStateStable }) => {
+                    if (isStateStable && appData) {
+                        await cloudSetItem(STORAGE_KEY, appData).catch(e => console.warn(
+                            'Final cloud save failed', e));
+                    }
+                });
+                document.addEventListener('visibilitychange', async () => {
+                    if (document.hidden && appData) {
+                        await cloudSetItem(STORAGE_KEY, appData).catch(e => console.warn(
+                            'Hidden cloud save failed', e));
                     }
                 });
             }
-
-            // ---------- Основной код приложения ----------
             const STORAGE_KEY = 'moneyflow_data';
             const SETTINGS_KEY = 'moneyflow_settings';
             const RATES_KEY = 'moneyflow_rates';
-
+            const CHUNK_SIZE = 4000;
             let currencyRates = { RUB: 1, USD: 90, EUR: 98, CNY: 0 };
-
             async function loadRates() {
                 const saved = localStorage.getItem(RATES_KEY);
                 if (saved) { try { currencyRates = JSON.parse(saved); } catch (e) {} }
                 try {
-                    const resp = await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/rub.json');
+                    const resp = await fetch(
+                        'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/rub.json');
                     const data = await resp.json();
                     const rub = data.rub;
                     currencyRates.USD = Math.round((1 / rub.usd) * 100) / 100;
@@ -896,25 +843,60 @@
                     console.warn('Не удалось обновить курсы валют');
                 }
             }
-
-            async function loadData() {
-                const localRaw = localStorage.getItem(STORAGE_KEY);
-                if (localRaw) {
-                    return JSON.parse(localRaw);
+            async function cloudSetItem(key, value) {
+                if (!tgCloud) return;
+                const str = JSON.stringify(value);
+                const chunks = [];
+                for (let i = 0; i < str.length; i += CHUNK_SIZE) {
+                    chunks.push(str.substring(i, i + CHUNK_SIZE));
                 }
+                const oldCount = parseInt(await tgCloud.getItem(key + '_chunks') || '0');
+                for (let i = 0; i < oldCount; i++) { try { await tgCloud.removeItem(key + '_chunk_' + i); } catch (
+                    e) {} }
+                await tgCloud.setItem(key + '_chunks', chunks.length.toString());
+                for (let i = 0; i < chunks.length; i++) {
+                    await tgCloud.setItem(key + '_chunk_' + i, chunks[i]);
+                }
+            }
+            async function cloudGetItem(key) {
+                if (!tgCloud) return null;
+                try {
+                    const chunksCount = await tgCloud.getItem(key + '_chunks');
+                    if (!chunksCount) return null;
+                    const count = parseInt(chunksCount);
+                    let result = '';
+                    for (let i = 0; i < count; i++) {
+                        const chunk = await tgCloud.getItem(key + '_chunk_' + i);
+                        if (chunk === null) return null;
+                        result += chunk;
+                    }
+                    return JSON.parse(result);
+                } catch (e) { console.warn('Cloud load error', e); return null; }
+            }
+            async function loadData() {
+                const cloudData = await cloudGetItem(STORAGE_KEY);
+                if (cloudData) {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudData));
+                    return cloudData;
+                }
+                const localRaw = localStorage.getItem(STORAGE_KEY);
+                if (localRaw) { return JSON.parse(localRaw); }
                 return getDefaultData();
             }
-
             async function saveData(data) {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                if (tgCloud) { await cloudSetItem(STORAGE_KEY, data).catch(e => console.warn('Cloud save failed',
+                        e)); }
             }
-
             function getDefaultData() {
                 return {
                     accounts: [
-                        { id: 'a1', name: 'Наличные', currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💵', isDebt: false, archived: false },
-                        { id: 'a2', name: 'Карта', currency: 'RUB', balance: 0, color: '#00b894', icon: '💳', isDebt: false, archived: false },
-                        { id: 'a3', name: 'Сбережения', currency: 'USD', balance: 0, color: '#fdcb6e', icon: '🏦', isDebt: false, archived: false },
+                        { id: 'a1', name: 'Наличные', currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💵',
+                            isDebt: false, archived: false },
+                        { id: 'a2', name: 'Карта', currency: 'RUB', balance: 0, color: '#00b894', icon: '💳',
+                            isDebt: false, archived: false },
+                        { id: 'a3', name: 'Сбережения', currency: 'USD', balance: 0, color: '#fdcb6e', icon: '🏦',
+                            isDebt: false, archived: false },
                     ],
                     categories: [
                         { id: 'c1', name: 'Зарплата', type: 'income', icon: '💰', color: '#00b894' },
@@ -936,7 +918,6 @@
                     monthlyBalances: [],
                 };
             }
-
             let appData = null;
             let currentTab = 'dashboard';
             let editingId = null;
@@ -944,42 +925,33 @@
             let dashboardShowUSD = false;
             let hideAmounts = false;
             let showArchivedAccounts = false;
-
-            async function save() { 
-                recalcMonthlyBalances();
-                await saveData(appData); 
-            }
-
+            async function save() { recalcMonthlyBalances();
+                await saveData(appData); }
             function genId() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); }
-
             function loadSettings() {
                 const raw = localStorage.getItem(SETTINGS_KEY);
                 return raw ? JSON.parse(raw) : { theme: 'light', hideAmounts: false };
             }
-
             function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
-
             let settings = loadSettings();
             if (settings.theme === 'dark') document.body.classList.add('dark');
             hideAmounts = settings.hideAmounts || false;
-
             function formatCurrency(amount, currency, rounded = false) {
                 const symbols = { RUB: '₽', USD: '$', EUR: '€' };
                 const sym = symbols[currency] || currency;
                 const num = rounded ? Math.round(amount) : amount;
-                return num.toLocaleString('ru-RU', rounded ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + sym;
+                return num.toLocaleString('ru-RU', rounded ? { maximumFractionDigits: 0 } : {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2 }) + ' ' + sym;
             }
-
             function formatAmountHidden(amount, currency, rounded = false) {
                 if (hideAmounts) return '***';
                 return formatCurrency(amount, currency, rounded);
             }
-
             function updateEyeButton() {
                 const eyeBtn = document.getElementById('dashboardEyeBtn');
-                if (eyeBtn) eyeBtn.textContent = hideAmounts ? '👁‍🗨' : '👁';
+                if (eyeBtn) eyeBtn.textContent = hideAmounts ? '👁' : '👁';
             }
-
             window.toggleHideAmounts = function() {
                 hideAmounts = !hideAmounts;
                 settings.hideAmounts = hideAmounts;
@@ -987,28 +959,24 @@
                 updateEyeButton();
                 renderAll();
             };
-
             function formatLocalDate(date) {
                 const y = date.getFullYear();
                 const m = String(date.getMonth() + 1).padStart(2, '0');
                 const d = String(date.getDate()).padStart(2, '0');
                 return `${y}-${m}-${d}`;
             }
-
             function getMonthRange() {
                 const now = new Date();
                 const start = new Date(now.getFullYear(), now.getMonth(), 1);
                 const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
                 return { start: formatLocalDate(start), end: formatLocalDate(end), inclusiveEnd: false };
             }
-
             function getYearRange() {
                 const now = new Date();
                 const start = new Date(now.getFullYear(), 0, 1);
                 const end = new Date(now.getFullYear() + 1, 0, 1);
                 return { start: formatLocalDate(start), end: formatLocalDate(end), inclusiveEnd: false };
             }
-
             function getWeekRange() {
                 const now = new Date();
                 const day = now.getDay();
@@ -1020,10 +988,8 @@
                 nextMonday.setDate(monday.getDate() + 7);
                 return { start: formatLocalDate(monday), end: formatLocalDate(nextMonday), inclusiveEnd: false };
             }
-
             function getAccount(id) { return appData.accounts.find(a => a.id === id); }
             function getCategory(id) { return appData.categories.find(c => c.id === id); }
-
             function getTransactionsInRange(start, end, accountId = 'all', inclusiveEnd = true) {
                 return appData.transactions.filter(tx => {
                     if (tx.type !== 'income' && tx.type !== 'expense') return false;
@@ -1033,7 +999,6 @@
                     return true;
                 });
             }
-
             function switchTab(tab) {
                 currentTab = tab;
                 document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -1042,32 +1007,31 @@
                 if (tabEl) tabEl.classList.add('active');
                 document.querySelectorAll(`.nav-item[data-tab="${tab}"]`).forEach(el => el.classList.add('active'));
                 if (tab === 'dashboard') renderDashboard();
-                if (tab === 'accounts') { renderAccounts(); updateTransferForm(); }
+                if (tab === 'accounts') { renderAccounts();
+                    updateTransferForm(); }
                 if (tab === 'transactions') renderTransactions();
-                if (tab === 'stats') { renderStats(); renderMonthlyCharts(); }
+                if (tab === 'stats') { renderStats();
+                    renderMonthlyCharts(); }
                 if (tab === 'budgets') renderBudgets();
             }
-
             document.querySelectorAll('.nav-item[data-tab]').forEach(btn => {
                 btn.addEventListener('click', () => switchTab(btn.dataset.tab));
             });
-
             function toggleTheme() {
                 document.body.classList.toggle('dark');
                 settings.theme = document.body.classList.contains('dark') ? 'dark' : 'light';
                 saveSettings(settings);
                 destroyCharts();
-                if (currentTab === 'stats') { renderStats(); renderMonthlyCharts(); }
+                if (currentTab === 'stats') { renderStats();
+                    renderMonthlyCharts(); }
             }
-
             document.getElementById('themeToggle').addEventListener('click', toggleTheme);
-            document.getElementById('mobileThemeToggle').addEventListener('click', () => { toggleTheme(); hideMobileMoreMenu(); });
-
+            document.getElementById('mobileThemeToggle').addEventListener('click', () => { toggleTheme();
+                hideMobileMoreMenu(); });
             function showModal(html) {
                 document.getElementById('modalContent').innerHTML = html;
                 document.getElementById('modalOverlay').style.display = 'flex';
             }
-
             function closeModal(e) {
                 if (e && e.target !== document.getElementById('modalOverlay')) return;
                 document.getElementById('modalOverlay').style.display = 'none';
@@ -1075,7 +1039,6 @@
             }
             document.getElementById('modalOverlay').addEventListener('click', closeModal);
             document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
-
             function showAccountModal(accountId = null) {
                 editingId = accountId;
                 let acc = accountId ? getAccount(accountId) : null;
@@ -1083,8 +1046,10 @@
                 let archiveBtnHtml = '';
                 if (acc) {
                     archiveBtnHtml = acc.archived ?
-                        '<button class="btn btn-warning btn-sm" onclick="archiveAccount(\'' + acc.id + '\', false)">📤 Из архива</button>' :
-                        '<button class="btn btn-outline btn-sm" onclick="archiveAccount(\'' + acc.id + '\', true)">📦 В архив</button>';
+                        '<button class="btn btn-warning btn-sm" onclick="archiveAccount(\'' + acc.id +
+                        '\', false)">📤 Из архива</button>' :
+                        '<button class="btn btn-outline btn-sm" onclick="archiveAccount(\'' + acc.id +
+                        '\', true)">📦 В архив</button>';
                 }
                 let html = `
                 <h2>${title}</h2>
@@ -1111,9 +1076,7 @@
                 </div>`;
                 showModal(html);
             }
-
             window.showAccountModal = showAccountModal;
-
             window.archiveAccount = function(id, archive) {
                 const acc = getAccount(id);
                 if (!acc) return;
@@ -1122,17 +1085,16 @@
                 closeModal();
                 renderAll();
             };
-
             window.deleteAccount = function(id) {
                 if (!confirm('Удалить счёт и все связанные транзакции?')) return;
                 appData.accounts = appData.accounts.filter(a => a.id !== id);
-                appData.transactions = appData.transactions.filter(tx => tx.accountId !== id && tx.transferFrom !== id && tx.transferTo !== id);
+                appData.transactions = appData.transactions.filter(tx => tx.accountId !== id && tx.transferFrom !==
+                    id && tx.transferTo !== id);
                 appData.budgets = appData.budgets.filter(b => b.accountId !== id);
                 save();
                 closeModal();
                 renderAll();
             };
-
             window.saveAccount = function() {
                 const name = document.getElementById('accName').value.trim();
                 const currency = document.getElementById('accCurrency').value;
@@ -1143,26 +1105,31 @@
                 if (!name) return alert('Введите название счёта');
                 if (editingId) {
                     const acc = getAccount(editingId);
-                    if (acc) { acc.name = name; acc.currency = currency; acc.color = color; acc.icon = icon; acc.balance = balance; acc.isDebt = isDebt; }
+                    if (acc) { acc.name = name;
+                        acc.currency = currency;
+                        acc.color = color;
+                        acc.icon = icon;
+                        acc.balance = balance;
+                        acc.isDebt = isDebt; }
                 } else {
-                    appData.accounts.push({ id: genId(), name, currency, balance, color, icon, isDebt, archived: false });
+                    appData.accounts.push({ id: genId(), name, currency, balance, color, icon, isDebt,
+                    archived: false });
                 }
                 save();
                 closeModal();
                 renderAll();
             };
-
             function buildCategoryOptions(selectedType, selectedCategoryId = null) {
                 const filtered = appData.categories.filter(c => c.type === selectedType);
                 if (filtered.length === 0) { return '<option value="">Нет категорий</option>'; }
                 let optionsHtml = '';
                 filtered.forEach(c => {
                     const selected = (c.id === selectedCategoryId) ? 'selected' : '';
-                    optionsHtml += `<option value="${c.id}" ${selected}>${c.icon} ${c.name} (${c.type==='income'?'доход':c.type==='expense'?'расход':'изм. цены'})</option>`;
+                    optionsHtml +=
+                        `<option value="${c.id}" ${selected}>${c.icon} ${c.name} (${c.type==='income'?'доход':c.type==='expense'?'расход':'изм. цены'})</option>`;
                 });
                 return optionsHtml;
             }
-
             window.updateTxCatOptions = function() {
                 const typeSelect = document.getElementById('txType');
                 const catSelect = document.getElementById('txCategory');
@@ -1170,15 +1137,17 @@
                 const currentType = typeSelect.value;
                 const previousValue = catSelect.value;
                 catSelect.innerHTML = buildCategoryOptions(currentType);
-                if (previousValue && [...catSelect.options].some(opt => opt.value === previousValue)) { catSelect.value = previousValue; }
+                if (previousValue && [...catSelect.options].some(opt => opt.value === previousValue)) { catSelect
+                        .value = previousValue; }
             };
-
             function showTransferEditModal(tx) {
                 editingId = tx.id;
                 const fromOptions = appData.accounts.filter(a => !a.archived).map(a =>
-                    `<option value="${a.id}" ${tx.transferFrom===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`).join('');
+                    `<option value="${a.id}" ${tx.transferFrom===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`
+                    ).join('');
                 const toOptions = appData.accounts.filter(a => !a.archived).map(a =>
-                    `<option value="${a.id}" ${tx.transferTo===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`).join('');
+                    `<option value="${a.id}" ${tx.transferTo===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`
+                    ).join('');
                 const html = `
                 <h2>Редактировать перевод</h2>
                 <div class="form-row">
@@ -1195,7 +1164,6 @@
                 </div>`;
                 showModal(html);
             }
-
             window.deleteTransfer = function(id) {
                 const tx = appData.transactions.find(t => t.id === id);
                 if (!tx || tx.type !== 'transfer') return;
@@ -1206,7 +1174,6 @@
                 closeModal();
                 renderAll();
             };
-
             window.saveTransferEdit = function() {
                 const fromId = document.getElementById('transferFromEdit').value;
                 const toId = document.getElementById('transferToEdit').value;
@@ -1220,7 +1187,9 @@
                 const convertedAmount = convertCurrency(amount, fromAcc.currency, toAcc.currency);
                 const oldTx = appData.transactions.find(t => t.id === editingId);
                 if (oldTx) applyTransfer(oldTx, true);
-                const newTx = { ...oldTx, transferFrom: fromId, transferTo: toId, amount: amount, convertedAmount: convertedAmount, date: date, note: note || `Перевод: ${fromAcc.name} → ${toAcc.name}`, tags: ['перевод'], accountId: fromId };
+                const newTx = { ...oldTx, transferFrom: fromId, transferTo: toId, amount: amount,
+                    convertedAmount: convertedAmount, date: date, note: note || `Перевод: ${fromAcc.name} → ${toAcc.name}`,
+                    tags: ['перевод'], accountId: fromId };
                 const idx = appData.transactions.findIndex(t => t.id === editingId);
                 if (idx >= 0) appData.transactions[idx] = newTx;
                 applyTransfer(newTx, false);
@@ -1229,30 +1198,35 @@
                 closeModal();
                 renderAll();
             };
-
             function applyTransfer(tx, reverse = false) {
                 const fromAcc = getAccount(tx.transferFrom);
                 const toAcc = getAccount(tx.transferTo);
                 if (!fromAcc || !toAcc) return;
                 const amount = tx.amount;
-                const convertedAmount = tx.convertedAmount || convertCurrency(amount, fromAcc.currency, toAcc.currency);
+                const convertedAmount = tx.convertedAmount || convertCurrency(amount, fromAcc.currency, toAcc
+                .currency);
                 const fromIsDebt = fromAcc.isDebt;
                 const toIsDebt = toAcc.isDebt;
                 if (reverse) {
-                    if (toIsDebt && !fromIsDebt) { fromAcc.balance += amount; toAcc.balance += convertedAmount; }
-                    else if (fromIsDebt && !toIsDebt) { fromAcc.balance -= amount; toAcc.balance -= convertedAmount; }
-                    else if (fromIsDebt && toIsDebt) { fromAcc.balance -= amount; toAcc.balance += convertedAmount; }
-                    else { fromAcc.balance += amount; toAcc.balance -= convertedAmount; }
+                    if (toIsDebt && !fromIsDebt) { fromAcc.balance += amount;
+                        toAcc.balance += convertedAmount; } else if (fromIsDebt && !toIsDebt) { fromAcc.balance -=
+                        amount;
+                        toAcc.balance -= convertedAmount; } else if (fromIsDebt && toIsDebt) { fromAcc.balance -=
+                        amount;
+                        toAcc.balance += convertedAmount; } else { fromAcc.balance += amount;
+                        toAcc.balance -= convertedAmount; }
                 } else {
-                    if (toIsDebt && !fromIsDebt) { fromAcc.balance -= amount; toAcc.balance -= convertedAmount; }
-                    else if (fromIsDebt && !toIsDebt) { fromAcc.balance += amount; toAcc.balance += convertedAmount; }
-                    else if (fromIsDebt && toIsDebt) { fromAcc.balance += amount; toAcc.balance -= convertedAmount; }
-                    else { fromAcc.balance -= amount; toAcc.balance += convertedAmount; }
+                    if (toIsDebt && !fromIsDebt) { fromAcc.balance -= amount;
+                        toAcc.balance -= convertedAmount; } else if (fromIsDebt && !toIsDebt) { fromAcc.balance +=
+                        amount;
+                        toAcc.balance += convertedAmount; } else if (fromIsDebt && toIsDebt) { fromAcc.balance +=
+                        amount;
+                        toAcc.balance -= convertedAmount; } else { fromAcc.balance -= amount;
+                        toAcc.balance += convertedAmount; }
                 }
                 fromAcc.balance = Math.round(fromAcc.balance * 100) / 100;
                 toAcc.balance = Math.round(toAcc.balance * 100) / 100;
             }
-
             function showTransactionModal(txId = null) {
                 if (txId) {
                     const tx = appData.transactions.find(t => t.id === txId);
@@ -1262,7 +1236,8 @@
                 let tx = txId ? appData.transactions.find(t => t.id === txId) : null;
                 let title = tx ? 'Редактировать транзакцию' : 'Новая транзакция';
                 let accOptions = appData.accounts.filter(a => !a.archived).map(a =>
-                    `<option value="${a.id}" ${tx?.accountId===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`).join('');
+                    `<option value="${a.id}" ${tx?.accountId===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`
+                    ).join('');
                 const initialType = tx?.type || 'expense';
                 const initialCategoryId = tx?.categoryId || null;
                 const catOptionsHtml = buildCategoryOptions(initialType, initialCategoryId);
@@ -1300,23 +1275,20 @@
                 </div>`;
                 showModal(html);
             }
-
             window.showTransactionModal = showTransactionModal;
-
             window.deleteTransaction = function(id) {
                 if (!confirm('Удалить транзакцию?')) return;
                 const tx = appData.transactions.find(t => t.id === id);
                 if (tx) {
-                    if (tx.type === 'transfer') { applyTransfer(tx, true); }
-                    else if (tx.type === 'revaluation') { const acc = getAccount(tx.accountId); if (acc) acc.balance -= tx.amount; }
-                    else { updateAccountBalance(tx, true); }
+                    if (tx.type === 'transfer') { applyTransfer(tx, true); } else if (tx.type === 'revaluation') {
+                        const acc = getAccount(tx.accountId);
+                        if (acc) acc.balance -= tx.amount; } else { updateAccountBalance(tx, true); }
                 }
                 appData.transactions = appData.transactions.filter(t => t.id !== id);
                 save();
                 closeModal();
                 renderAll();
             };
-
             window.saveTransaction = function() {
                 const type = document.getElementById('txType').value;
                 const amount = parseFloat(document.getElementById('txAmount').value);
@@ -1331,25 +1303,26 @@
                 if (!amount) return alert('Введите сумму');
                 if (!date) return alert('Выберите дату');
                 if (!categoryId) return alert('Выберите категорию');
-                if (type === 'revaluation') { const cat = getCategory(categoryId); if (!cat || cat.type !== 'revaluation') return alert('Выберите категорию "Изменение цены"'); }
+                if (type === 'revaluation') { const cat = getCategory(categoryId); if (!cat || cat.type !==
+                        'revaluation') return alert('Выберите категорию "Изменение цены"'); }
                 const oldTx = editingId ? appData.transactions.find(t => t.id === editingId) : null;
                 if (oldTx) {
                     if (oldTx.type === 'transfer') applyTransfer(oldTx, true);
-                    else if (oldTx.type === 'revaluation') { const acc = getAccount(oldTx.accountId); if (acc) acc.balance -= oldTx.amount; }
-                    else { updateAccountBalance(oldTx, true); }
+                    else if (oldTx.type === 'revaluation') { const acc = getAccount(oldTx.accountId); if (acc) acc
+                            .balance -= oldTx.amount; } else { updateAccountBalance(oldTx, true); }
                 }
-                const txData = { id: editingId || genId(), type, amount, accountId, categoryId, date, note, tags, isRecurring, recurringPeriod };
-                if (editingId) { const idx = appData.transactions.findIndex(t => t.id === editingId); if (idx >= 0) appData.transactions[idx] = txData; }
-                else { appData.transactions.push(txData); }
-                if (type === 'revaluation') { const acc = getAccount(accountId); if (acc) acc.balance += amount; }
-                else { updateAccountBalance(txData, false); }
+                const txData = { id: editingId || genId(), type, amount, accountId, categoryId, date, note, tags,
+                    isRecurring, recurringPeriod };
+                if (editingId) { const idx = appData.transactions.findIndex(t => t.id === editingId); if (idx >= 0)
+                        appData.transactions[idx] = txData; } else { appData.transactions.push(txData); }
+                if (type === 'revaluation') { const acc = getAccount(accountId); if (acc) acc.balance += amount; } else {
+                    updateAccountBalance(txData, false); }
                 appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 save();
                 closeModal();
                 processRecurring();
                 renderAll();
             };
-
             function updateAccountBalance(tx, reverse = false) {
                 if (tx.type === 'transfer') return;
                 const acc = getAccount(tx.accountId);
@@ -1360,7 +1333,6 @@
                 acc.balance += sign * mult * tx.amount;
                 acc.balance = Math.round(acc.balance * 100) / 100;
             }
-
             function processRecurring() {
                 const today = formatLocalDate(new Date());
                 let changed = false;
@@ -1369,38 +1341,43 @@
                     const lastDate = tx.date;
                     let nextDate = getNextRecurringDate(lastDate, tx.recurringPeriod);
                     while (nextDate && nextDate <= today) {
-                        const exists = appData.transactions.some(t => t.date === nextDate && t.accountId === tx.accountId && t.amount === tx.amount && t.categoryId === tx.categoryId && t.note === tx.note);
+                        const exists = appData.transactions.some(t => t.date === nextDate && t.accountId ===
+                            tx.accountId && t.amount === tx.amount && t.categoryId === tx.categoryId && t
+                            .note === tx.note);
                         if (!exists) {
-                            const newTx = { ...tx, id: genId(), date: nextDate, isRecurring: false, recurringPeriod: null };
+                            const newTx = { ...tx, id: genId(), date: nextDate, isRecurring: false,
+                                recurringPeriod: null };
                             appData.transactions.push(newTx);
-                            if (tx.type === 'revaluation') { const acc = getAccount(tx.accountId); if (acc) acc.balance += tx.amount; }
-                            else { updateAccountBalance(newTx, false); }
+                            if (tx.type === 'revaluation') { const acc = getAccount(tx.accountId); if (acc) acc
+                                    .balance += tx.amount; } else { updateAccountBalance(newTx, false); }
                             changed = true;
                         }
                         tx.date = nextDate;
                         nextDate = getNextRecurringDate(nextDate, tx.recurringPeriod);
                     }
                 });
-                if (changed) { appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)); save(); }
+                if (changed) { appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(
+                        a.id));
+                    save(); }
             }
-
             function getNextRecurringDate(dateStr, period) {
                 const d = new Date(dateStr);
-                switch (period) {
-                    case 'weekly': d.setDate(d.getDate() + 7); break;
-                    case 'monthly': d.setMonth(d.getMonth() + 1); break;
-                    case 'yearly': d.setFullYear(d.getFullYear() + 1); break;
-                    default: return null;
-                }
+                switch (period) { case 'weekly':
+                        d.setDate(d.getDate() + 7);
+                        break;
+                    case 'monthly':
+                        d.setMonth(d.getMonth() + 1);
+                        break;
+                    case 'yearly':
+                        d.setFullYear(d.getFullYear() + 1);
+                        break; default: return null; }
                 return formatLocalDate(d);
             }
-
             function convertCurrency(amount, fromCur, toCur) {
                 if (fromCur === toCur) return amount;
                 const rubAmount = amount * (currencyRates[fromCur] || 1);
                 return Math.round((rubAmount / (currencyRates[toCur] || 1)) * 100) / 100;
             }
-
             function updateTransferForm() {
                 const fromId = document.getElementById('transferFrom').value;
                 const toId = document.getElementById('transferTo').value;
@@ -1408,12 +1385,11 @@
                 const toAcc = toId ? getAccount(toId) : null;
                 const amountBlock = document.getElementById('transferAmountBlock');
                 const debtBlock = document.getElementById('transferDebtBlock');
-                if (toAcc && toAcc.isDebt && fromAcc && !fromAcc.isDebt) { amountBlock.style.display = 'none'; debtBlock.style.display = 'block'; }
-                else { amountBlock.style.display = 'block'; debtBlock.style.display = 'none'; }
+                if (toAcc && toAcc.isDebt && fromAcc && !fromAcc.isDebt) { amountBlock.style.display = 'none';
+                    debtBlock.style.display = 'block'; } else { amountBlock.style.display = 'block';
+                    debtBlock.style.display = 'none'; }
             }
-
             window.updateTransferForm = updateTransferForm;
-
             window.makeTransfer = function() {
                 const fromId = document.getElementById('transferFrom').value;
                 const toId = document.getElementById('transferTo').value;
@@ -1440,11 +1416,17 @@
                     convertedAmount = convertCurrency(transferAmount, fromAcc.currency, toAcc.currency);
                     document.getElementById('transferAmount').value = '';
                 }
-                const transferTx = { id: genId(), type: 'transfer', amount: transferAmount, accountId: fromId, date, note: `Перевод: ${fromAcc.name} → ${toAcc.name}`, tags: ['перевод'], transferFrom: fromId, transferTo: toId, convertedAmount: convertedAmount, isRecurring: false, recurringPeriod: null };
+                const transferTx = { id: genId(), type: 'transfer', amount: transferAmount, accountId: fromId,
+                    date, note: `Перевод: ${fromAcc.name} → ${toAcc.name}`, tags: ['перевод'],
+                    transferFrom: fromId, transferTo: toId, convertedAmount: convertedAmount, isRecurring: false,
+                    recurringPeriod: null };
                 applyTransfer(transferTx, false);
                 appData.transactions.push(transferTx);
                 if (interest > 0) {
-                    const interestTx = { id: genId(), type: 'expense', amount: interest, accountId: fromId, categoryId: null, date, note: `Проценты по кредиту: ${toAcc.name}`, tags: ['кредит', 'проценты'], isRecurring: false, recurringPeriod: null };
+                    const interestTx = { id: genId(), type: 'expense', amount: interest, accountId: fromId,
+                        categoryId: null, date, note: `Проценты по кредиту: ${toAcc.name}`, tags: ['кредит',
+                            'проценты'
+                        ], isRecurring: false, recurringPeriod: null };
                     appData.transactions.push(interestTx);
                 }
                 appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
@@ -1452,12 +1434,12 @@
                 renderAll();
                 alert('Перевод выполнен!');
             };
-
             function showBudgetModal(budgetId = null) {
                 editingId = budgetId;
                 let b = budgetId ? appData.budgets.find(bu => bu.id === budgetId) : null;
                 let catOptions = appData.categories.filter(c => c.type === 'expense').map(c =>
-                    `<option value="${c.id}" ${b?.categoryId===c.id?'selected':''}>${c.icon} ${c.name}</option>`).join('');
+                    `<option value="${c.id}" ${b?.categoryId===c.id?'selected':''}>${c.icon} ${c.name}</option>`).join(
+                    '');
                 let accOptions = appData.accounts.filter(a => !a.archived).map(a =>
                     `<option value="${a.id}" ${b?.accountId===a.id?'selected':''}>${a.name}</option>`).join('');
                 let html = `
@@ -1478,9 +1460,11 @@
                 </div>`;
                 showModal(html);
             }
-
             window.showBudgetModal = showBudgetModal;
-            window.deleteBudget = function(id) { appData.budgets = appData.budgets.filter(b => b.id !== id); save(); closeModal(); renderBudgets(); };
+            window.deleteBudget = function(id) { appData.budgets = appData.budgets.filter(b => b.id !== id);
+                save();
+                closeModal();
+                renderBudgets(); };
             window.saveBudget = function() {
                 const categoryId = document.getElementById('budgetCategory').value;
                 const accountId = document.getElementById('budgetAccount').value;
@@ -1488,15 +1472,15 @@
                 const period = document.getElementById('budgetPeriod').value;
                 if (!amount || amount <= 0) return alert('Введите лимит');
                 const data = { id: editingId || genId(), categoryId, accountId, amount, period };
-                if (editingId) { const idx = appData.budgets.findIndex(b => b.id === editingId); if (idx >= 0) appData.budgets[idx] = data; }
-                else { appData.budgets.push(data); }
+                if (editingId) { const idx = appData.budgets.findIndex(b => b.id === editingId); if (idx >= 0) appData
+                        .budgets[idx] = data; } else { appData.budgets.push(data); }
                 save();
                 closeModal();
                 renderBudgets();
             };
-
             function recalcMonthlyBalances() {
-                const txs = [...appData.transactions].filter(tx => tx.type !== 'transfer').sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+                const txs = [...appData.transactions].filter(tx => tx.type !== 'transfer').sort((a, b) => a.date
+                    .localeCompare(b.date) || a.id.localeCompare(b.id));
                 if (txs.length === 0) { appData.monthlyBalances = []; return; }
                 const firstDate = txs[0].date;
                 const lastDate = formatLocalDate(new Date());
@@ -1507,7 +1491,11 @@
                 const initialBalances = {};
                 for (const acc of appData.accounts) {
                     let sumEffect = 0;
-                    for (const tx of txs) { if (tx.accountId !== acc.id) continue; if (tx.type === 'income' || tx.type === 'expense') { let mult = tx.type === 'income' ? 1 : -1; if (acc.isDebt) mult = -mult; sumEffect += mult * tx.amount; } else if (tx.type === 'revaluation') { sumEffect += tx.amount; } }
+                    for (const tx of txs) { if (tx.accountId !== acc.id) continue; if (tx.type === 'income' || tx
+                            .type === 'expense') { let mult = tx.type === 'income' ? 1 : -1; if (acc.isDebt)
+                                mult = -mult;
+                            sumEffect += mult * tx.amount; } else if (tx.type === 'revaluation') { sumEffect +=
+                            tx.amount; } }
                     initialBalances[acc.id] = acc.balance - sumEffect;
                 }
                 const monthlyBalances = [];
@@ -1522,36 +1510,51 @@
                     while (txIndex < txs.length && txs[txIndex].date <= lastDayStr) {
                         const tx = txs[txIndex];
                         const acc = getAccount(tx.accountId);
-                        if (acc) { if (tx.type === 'income' || tx.type === 'expense') { let mult = tx.type === 'income' ? 1 : -1; if (acc.isDebt) mult = -mult; currentBalances[tx.accountId] += mult * tx.amount; } else if (tx.type === 'revaluation') { currentBalances[tx.accountId] += tx.amount; } }
+                        if (acc) { if (tx.type === 'income' || tx.type === 'expense') { let mult = tx.type ===
+                                    'income' ? 1 : -1; if (acc.isDebt) mult = -mult;
+                                currentBalances[tx.accountId] += mult * tx.amount; } else if (tx.type ===
+                                'revaluation') { currentBalances[tx.accountId] += tx.amount; } }
                         txIndex++;
                     }
                     let netWorth = 0;
-                    for (const acc of appData.accounts) { const bal = currentBalances[acc.id] || 0; const rub = convertCurrency(bal, acc.currency, 'RUB'); if (acc.isDebt) netWorth -= rub; else netWorth += rub; }
+                    for (const acc of appData.accounts) { const bal = currentBalances[acc.id] || 0;
+                        const rub = convertCurrency(bal, acc.currency, 'RUB'); if (acc.isDebt) netWorth -=
+                        rub;
+                        else netWorth += rub; }
                     monthlyBalances.push({ date: lastDayStr, balance: Math.round(netWorth * 100) / 100 });
                     current.setMonth(current.getMonth() + 1);
                 }
                 appData.monthlyBalances = monthlyBalances;
             }
-
             function exportCSV() {
                 let csv = '';
                 csv += '[Счета]\n';
                 csv += 'Тип;Название;Валюта;Цвет;Иконка;Долг;Архив\n';
-                appData.accounts.forEach(a => { csv += `Счёт;${a.name};${a.currency};${a.color};${a.icon};${a.isDebt};${a.archived}\n`; });
+                appData.accounts.forEach(a => { csv +=
+                        `Счёт;${a.name};${a.currency};${a.color};${a.icon};${a.isDebt};${a.archived}\n`; });
                 csv += '\n[Категории]\n';
                 csv += 'Тип;Название;Тип категории;Иконка;Цвет\n';
-                appData.categories.forEach(c => { csv += `Категория;${c.name};${c.type};${c.icon};${c.color}\n`; });
+                appData.categories.forEach(c => { csv +=
+                    `Категория;${c.name};${c.type};${c.icon};${c.color}\n`; });
                 csv += '\n[Транзакции]\n';
                 csv += 'Дата;Тип;Сумма;Валюта;Счёт;Категория;Заметка;Теги\n';
                 appData.transactions.forEach(tx => {
-                    if (tx.type === 'transfer') { const fromAcc = getAccount(tx.transferFrom); const toAcc = getAccount(tx.transferTo); csv += `${tx.date};Перевод;${tx.amount};${fromAcc?.currency||''};${fromAcc?.name||''} -> ${toAcc?.name||''};;${tx.note};перевод\n`; }
-                    else if (tx.type === 'revaluation') { const acc = getAccount(tx.accountId); const cat = getCategory(tx.categoryId); csv += `${tx.date};Изменение цены;${tx.amount};${acc?.currency||''};${acc?.name||''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`; }
-                    else { const acc = getAccount(tx.accountId); const cat = getCategory(tx.categoryId); csv += `${tx.date};${tx.type==='income'?'Доход':'Расход'};${tx.amount};${acc?.currency||''};${acc?.name||''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`; }
+                    if (tx.type === 'transfer') { const fromAcc = getAccount(tx.transferFrom);
+                        const toAcc = getAccount(tx.transferTo); csv +=
+                            `${tx.date};Перевод;${tx.amount};${fromAcc?.currency||''};${fromAcc?.name||''} -> ${toAcc?.name||''};;${tx.note};перевод\n`; } else if (
+                        tx.type === 'revaluation') { const acc = getAccount(tx.accountId);
+                        const cat = getCategory(tx.categoryId); csv +=
+                            `${tx.date};Изменение цены;${tx.amount};${acc?.currency||''};${acc?.name||''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`; } else { const acc =
+                            getAccount(tx.accountId);
+                        const cat = getCategory(tx.categoryId); csv +=
+                            `${tx.date};${tx.type==='income'?'Доход':'Расход'};${tx.amount};${acc?.currency||''};${acc?.name||''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`; }
                 });
                 csv += '\n[Балансы счетов]\n';
                 csv += 'Тип;Название;Сумма;Валюта\n';
                 appData.accounts.forEach(a => { csv += `Баланс;${a.name};${a.balance};${a.currency}\n`; });
-                if (appData.monthlyBalances.length) { csv += '\n[Балансы на конец месяца]\n'; csv += 'Дата;Баланс RUB\n'; appData.monthlyBalances.forEach(m => { csv += `${m.date};${m.balance}\n`; }); }
+                if (appData.monthlyBalances.length) { csv += '\n[Балансы на конец месяца]\n';
+                    csv += 'Дата;Баланс RUB\n';
+                    appData.monthlyBalances.forEach(m => { csv += `${m.date};${m.balance}\n`; }); }
                 const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -1560,18 +1563,19 @@
                 a.click();
                 URL.revokeObjectURL(url);
             }
-
             document.getElementById('exportBtn').addEventListener('click', exportCSV);
-            document.getElementById('mobileExportBtn').addEventListener('click', () => { exportCSV(); hideMobileMoreMenu(); });
-
+            document.getElementById('mobileExportBtn').addEventListener('click', () => { exportCSV();
+                hideMobileMoreMenu(); });
             function triggerImport() { document.getElementById('importFileInput').click(); }
             document.getElementById('importBtn').addEventListener('click', triggerImport);
-            document.getElementById('mobileImportBtn').addEventListener('click', () => { triggerImport(); hideMobileMoreMenu(); });
-
+            document.getElementById('mobileImportBtn').addEventListener('click', () => { triggerImport();
+                hideMobileMoreMenu(); });
             function importCSV(csvText) {
                 const lines = csvText.trim().split('\n');
                 if (lines.length < 2) return 0;
-                let importedAccounts = 0, importedCategories = 0, importedTransactions = 0;
+                let importedAccounts = 0,
+                    importedCategories = 0,
+                    importedTransactions = 0;
                 let section = null;
                 const importedBalances = [];
                 for (let i = 0; i < lines.length; i++) {
@@ -1580,18 +1584,70 @@
                     if (line.startsWith('[')) { section = line.replace(/[\[\]]/g, '').toLowerCase(); continue; }
                     const cols = line.split(';');
                     if (cols.length === 0) continue;
-                    if (section === 'счета') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() === 'счёт') { const name = cols[1]?.trim(), currency = cols[2]?.trim() || 'RUB', color = cols[3]?.trim() || '#6c5ce7', icon = cols[4]?.trim() || '💳', isDebt = cols[5]?.trim().toLowerCase() === 'true', archived = cols[6]?.trim().toLowerCase() === 'true'; if (name && !appData.accounts.find(a => a.name === name)) { appData.accounts.push({ id: genId(), name, currency, balance: 0, color, icon, isDebt, archived: archived || false }); importedAccounts++; } } }
-                    else if (section === 'категории') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() === 'категория') { const name = cols[1]?.trim(), type = cols[2]?.trim() || 'expense', icon = cols[3]?.trim() || '📌', color = cols[4]?.trim() || '#6c5ce7'; if (name && !appData.categories.find(c => c.name === name && c.type === type)) { appData.categories.push({ id: genId(), name, type, icon, color }); importedCategories++; } } }
-                    else if (section === 'транзакции') { if (cols[0]?.trim().toLowerCase() === 'дата') continue; const date = cols[0]?.trim(); if (!date || cols.length < 3) continue; const typeStr = cols[1]?.trim().toLowerCase(); if (typeStr === 'перевод') continue; const amount = parseFloat(cols[2]?.replace(',', '.')); if (isNaN(amount)) continue; let type, categoryType; if (typeStr.includes('доход')) { type = 'income'; categoryType = 'income'; } else if (typeStr.includes('расход')) { type = 'expense'; categoryType = 'expense'; } else if (typeStr.includes('изменение цены')) { type = 'revaluation'; categoryType = 'revaluation'; } else continue; const accountName = cols[4]?.trim() || 'Основной', categoryName = cols[5]?.trim(), note = cols[6]?.trim() || '', tags = cols[7] ? cols[7].split(' ').filter(Boolean) : []; let account = appData.accounts.find(a => a.name === accountName); if (!account) { account = { id: genId(), name: accountName, currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💳', isDebt: false, archived: false }; appData.accounts.push(account); importedAccounts++; } let category = null; if (categoryName) { category = appData.categories.find(c => c.name === categoryName && c.type === categoryType); if (!category) { category = { id: genId(), name: categoryName, type: categoryType, icon: '📌', color: '#6c5ce7' }; appData.categories.push(category); importedCategories++; } } const tx = { id: genId(), type, amount, accountId: account.id, categoryId: category ? category.id : null, date, note, tags, isRecurring: false, recurringPeriod: null }; appData.transactions.push(tx); if (type === 'revaluation') { account.balance += amount; } else { updateAccountBalance(tx, false); } importedTransactions++; }
-                    else if (section === 'балансы счетов') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() === 'баланс') { const name = cols[1]?.trim(), amount = parseFloat(cols[2]?.replace(',', '.')), currency = cols[3]?.trim() || 'RUB'; if (name && !isNaN(amount)) importedBalances.push({ name, amount, currency }); } }
-                    else if (section === 'балансы на конец месяца') { continue; }
+                    if (section === 'счета') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim()
+                            .toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() ===
+                            'счёт') { const name = cols[1]?.trim(),
+                                currency = cols[2]?.trim() || 'RUB',
+                                color = cols[3]?.trim() || '#6c5ce7',
+                                icon = cols[4]?.trim() || '💳',
+                                isDebt = cols[5]?.trim().toLowerCase() === 'true',
+                                archived = cols[6]?.trim().toLowerCase() === 'true'; if (name && !appData
+                                .accounts.find(a => a.name === name)) { appData.accounts.push({ id: genId(),
+                                    name, currency, balance: 0, color, icon, isDebt,
+                                archived: archived || false });
+                            importedAccounts++; } } } else if (section === 'категории') { if (cols[0]?.trim()
+                            .toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название')
+                        continue; if (cols[0]?.trim().toLowerCase() === 'категория') { const name = cols[1]
+                            ?.trim(),
+                            type = cols[2]?.trim() || 'expense',
+                            icon = cols[3]?.trim() || '📌',
+                            color = cols[4]?.trim() || '#6c5ce7'; if (name && !appData.categories.find(c => c
+                                .name === name && c.type === type)) { appData.categories.push({ id: genId(),
+                                name, type, icon, color });
+                            importedCategories++; } } } else if (section === 'транзакции') { if (cols[0]?.trim()
+                            .toLowerCase() === 'дата') continue;
+                        const date = cols[0]?.trim(); if (!date || cols.length < 3) continue;
+                        const typeStr = cols[1]?.trim().toLowerCase(); if (typeStr === 'перевод') continue;
+                        const amount = parseFloat(cols[2]?.replace(',', '.')); if (isNaN(amount)) continue;
+                        let type, categoryType; if (typeStr.includes('доход')) { type = 'income';
+                            categoryType = 'income'; } else if (typeStr.includes('расход')) { type = 'expense';
+                            categoryType = 'expense'; } else if (typeStr.includes('изменение цены')) { type =
+                            'revaluation';
+                            categoryType = 'revaluation'; } else continue;
+                        const accountName = cols[4]?.trim() || 'Основной',
+                            categoryName = cols[5]?.trim(),
+                            note = cols[6]?.trim() || '',
+                            tags = cols[7] ? cols[7].split(' ').filter(Boolean) : [];
+                        let account = appData.accounts.find(a => a.name === accountName); if (!account) { account = {
+                                id: genId(), name: accountName, currency: 'RUB', balance: 0, color: '#6c5ce7',
+                                icon: '💳', isDebt: false, archived: false };
+                            appData.accounts.push(account);
+                            importedAccounts++; }
+                        let category = null; if (categoryName) { category = appData.categories.find(c => c.name ===
+                                categoryName && c.type === categoryType); if (!category) { category = { id: genId(),
+                                    name: categoryName, type: categoryType, icon: '📌', color: '#6c5ce7' };
+                                appData.categories.push(category);
+                                importedCategories++; } }
+                        const tx = { id: genId(), type, amount, accountId: account.id, categoryId: category ? category
+                                .id : null, date, note, tags, isRecurring: false, recurringPeriod: null };
+                        appData.transactions.push(tx); if (type === 'revaluation') { account.balance +=
+                        amount; } else { updateAccountBalance(tx, false); }
+                        importedTransactions++;
+                    } else if (section === 'балансы счетов') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]
+                            ?.trim().toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() ===
+                            'баланс') { const name = cols[1]?.trim(),
+                                amount = parseFloat(cols[2]?.replace(',', '.')),
+                                currency = cols[3]?.trim() || 'RUB'; if (name && !isNaN(amount)) importedBalances
+                                .push({ name, amount, currency }); } } else if (section === 'балансы на конец месяца') {
+                        continue; }
                 }
-                if (importedBalances.length > 0) { importedBalances.forEach(b => { const acc = appData.accounts.find(a => a.name === b.name && a.currency === b.currency); if (acc) acc.balance = b.amount; }); }
+                if (importedBalances.length > 0) { importedBalances.forEach(b => { const acc = appData.accounts.find(
+                        a => a.name === b.name && a.currency === b.currency); if (acc) acc.balance = b
+                    .amount; }); }
                 appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 save();
                 return { accounts: importedAccounts, categories: importedCategories, transactions: importedTransactions };
             }
-
             document.getElementById('importFileInput').addEventListener('change', function(e) {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -1599,18 +1655,19 @@
                 reader.onload = function(ev) {
                     const text = ev.target.result;
                     const result = importCSV(text);
-                    const total = result.accounts + result.categories + result.transactions;
-                    if (total === 0) { alert('Файл не содержит данных для импорта.'); }
-                    else { alert(`Импортировано: счетов ${result.accounts}, категорий ${result.categories}, транзакций ${result.transactions}.`); renderAll(); }
+                    const total = result.accounts + result.categories + result.transactions; if (total === 0) { alert(
+                        'Файл не содержит данных для импорта.'); } else { alert(
+                        `Импортировано: счетов ${result.accounts}, категорий ${result.categories}, транзакций ${result.transactions}.`
+                        );
+                    renderAll(); }
                 };
                 reader.readAsText(file, 'UTF-8');
                 this.value = '';
             });
-
             function openCategoriesModal() { showCategoriesModal(); }
             document.getElementById('categoriesBtn').addEventListener('click', openCategoriesModal);
-            document.getElementById('mobileCategoriesBtn').addEventListener('click', () => { openCategoriesModal(); hideMobileMoreMenu(); });
-
+            document.getElementById('mobileCategoriesBtn').addEventListener('click', () => { openCategoriesModal();
+                hideMobileMoreMenu(); });
             function showCategoriesModal() {
                 let listHtml = appData.categories.map(c => `
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
@@ -1640,7 +1697,6 @@
                 <button class="btn btn-outline btn-sm" onclick="closeModal()" style="margin-left:8px;">Закрыть</button>`;
                 showModal(html);
             }
-
             window.showEditCategoryModal = function(catId) {
                 const cat = getCategory(catId);
                 if (!cat) return;
@@ -1664,7 +1720,6 @@
                 </div>`;
                 showModal(html);
             };
-
             window.saveEditCategory = function(catId) {
                 const cat = getCategory(catId);
                 if (!cat) return;
@@ -1673,12 +1728,14 @@
                 const icon = document.getElementById('editCatIcon').value || '📌';
                 const color = document.getElementById('editCatColor').value;
                 if (!name) return alert('Введите название');
-                cat.name = name; cat.type = type; cat.icon = icon; cat.color = color;
+                cat.name = name;
+                cat.type = type;
+                cat.icon = icon;
+                cat.color = color;
                 save();
                 showCategoriesModal();
                 renderAll();
             };
-
             window.deleteCategory = function(id) {
                 if (!confirm('Удалить категорию? Транзакции останутся, но без привязки к категории.')) return;
                 appData.categories = appData.categories.filter(c => c.id !== id);
@@ -1687,51 +1744,66 @@
                 showCategoriesModal();
                 renderAll();
             };
-
             window.addCategory = function() {
-                const name = document.getElementById('newCatName').value.trim(), type = document.getElementById('newCatType').value, icon = document.getElementById('newCatIcon').value || '📌', color = document.getElementById('newCatColor').value;
+                const name = document.getElementById('newCatName').value.trim(),
+                    type = document.getElementById('newCatType').value,
+                    icon = document.getElementById('newCatIcon').value || '📌',
+                    color = document.getElementById('newCatColor').value;
                 if (!name) return alert('Введите название');
                 appData.categories.push({ id: genId(), name, type, icon, color });
                 save();
                 showCategoriesModal();
                 renderAll();
             };
-
             window.handleStatsPeriodChange = function() {
                 const period = document.getElementById('statsPeriod').value;
                 const customDiv = document.getElementById('customDateRange');
-                if (period === 'custom') { customDiv.style.display = 'flex'; if (!document.getElementById('statsDateFrom').value) { const today = formatLocalDate(new Date()); document.getElementById('statsDateFrom').value = today; document.getElementById('statsDateTo').value = today; } }
-                else { customDiv.style.display = 'none'; }
+                if (period === 'custom') { customDiv.style.display = 'flex'; if (!document.getElementById('statsDateFrom')
+                        .value) { const today = formatLocalDate(new Date());
+                        document.getElementById('statsDateFrom').value = today;
+                        document.getElementById('statsDateTo').value = today; } } else { customDiv.style.display =
+                    'none'; }
                 renderStats();
             };
-
             function getStatsRange() {
                 const period = document.getElementById('statsPeriod').value;
                 if (period === 'week') return { ...getWeekRange(), inclusiveEnd: false };
                 if (period === 'month') return { ...getMonthRange(), inclusiveEnd: false };
                 if (period === 'year') return { ...getYearRange(), inclusiveEnd: false };
                 if (period === 'all') return { start: '2000-01-01', end: '2099-12-31', inclusiveEnd: false };
-                if (period === 'custom') { return { start: document.getElementById('statsDateFrom').value || formatLocalDate(new Date()), end: document.getElementById('statsDateTo').value || formatLocalDate(new Date()), inclusiveEnd: true }; }
+                if (period === 'custom') { return { start: document.getElementById('statsDateFrom').value || formatLocalDate(
+                            new Date()), end: document.getElementById('statsDateTo').value || formatLocalDate(
+                        new Date()), inclusiveEnd: true }; }
                 return { ...getMonthRange(), inclusiveEnd: false };
             }
-
             function getMonthlyRange() {
                 const period = document.getElementById('monthlyPeriod').value;
                 const today = formatLocalDate(new Date());
-                const firstTxDate = appData.transactions.length ? appData.transactions.filter(tx => tx.type !== 'transfer').reduce((min, tx) => tx.date < min ? tx.date : min, appData.transactions[0].date) : '2000-01-01';
-                if (period === '3months') { const d = new Date(); d.setMonth(d.getMonth() - 3); let start = formatLocalDate(d); if (start < firstTxDate) start = firstTxDate; return { start, end: today, inclusiveEnd: true }; }
-                else if (period === '6months') { const d = new Date(); d.setMonth(d.getMonth() - 6); let start = formatLocalDate(d); if (start < firstTxDate) start = firstTxDate; return { start, end: today, inclusiveEnd: true }; }
-                else if (period === '1year') { const d = new Date(); d.setFullYear(d.getFullYear() - 1); let start = formatLocalDate(d); if (start < firstTxDate) start = firstTxDate; return { start, end: today, inclusiveEnd: true }; }
-                else if (period === 'all') { return { start: firstTxDate, end: today, inclusiveEnd: true }; }
-                else if (period === 'custom') { const from = document.getElementById('monthlyDateFrom').value || today; const to = document.getElementById('monthlyDateTo').value || today; return { start: from, end: to, inclusiveEnd: true }; }
-                const d = new Date(); d.setFullYear(d.getFullYear() - 1); let start = formatLocalDate(d); if (start < firstTxDate) start = firstTxDate; return { start, end: today, inclusiveEnd: true };
+                const firstTxDate = appData.transactions.length ? appData.transactions.filter(tx => tx.type !== 'transfer')
+                    .reduce((min, tx) => tx.date < min ? tx.date : min, appData.transactions[0].date) : '2000-01-01';
+                if (period === '3months') { const d = new Date();
+                    d.setMonth(d.getMonth() - 3); let start = formatLocalDate(d); if (start < firstTxDate) start =
+                        firstTxDate; return { start, end: today, inclusiveEnd: true }; } else if (period === '6months') {
+                    const d = new Date();
+                    d.setMonth(d.getMonth() - 6); let start = formatLocalDate(d); if (start < firstTxDate) start =
+                        firstTxDate; return { start, end: today, inclusiveEnd: true }; } else if (period === '1year') {
+                    const d = new Date();
+                    d.setFullYear(d.getFullYear() - 1); let start = formatLocalDate(d); if (start < firstTxDate) start =
+                        firstTxDate; return { start, end: today, inclusiveEnd: true }; } else if (period === 'all') { return {
+                        start: firstTxDate, end: today, inclusiveEnd: true }; } else if (period === 'custom') { const from =
+                        document.getElementById('monthlyDateFrom').value || today;
+                    const to = document.getElementById('monthlyDateTo').value || today; return { start: from, end: to,
+                        inclusiveEnd: true }; }
+                const d = new Date();
+                d.setFullYear(d.getFullYear() - 1); let start = formatLocalDate(d); if (start < firstTxDate) start =
+                    firstTxDate; return { start, end: today, inclusiveEnd: true };
             }
-
             function destroyCharts(keys = null) {
-                if (keys) { keys.forEach(k => { if (charts[k]) { charts[k].destroy(); delete charts[k]; } }); }
-                else { Object.values(charts).forEach(c => { try { c.destroy(); } catch (e) {} }); charts = {}; }
+                if (keys) { keys.forEach(k => { if (charts[k]) { charts[k].destroy();
+                        delete charts[k]; } }); } else { Object.values(charts).forEach(c => { try { c.destroy(); } catch (
+                        e) {} });
+                    charts = {}; }
             }
-
             function renderStats() {
                 destroyCharts(['expenseChart', 'incomeChart', 'assetsChart', 'debtsChart']);
                 updateAccountSelects();
@@ -1742,94 +1814,172 @@
                 const totalIncome = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
                 document.getElementById('expenseTotalValue').textContent = `Всего расходов: ${formatCurrency(totalExpense, 'RUB', true)}`;
                 document.getElementById('incomeTotalValue').textContent = `Всего доходов: ${formatCurrency(totalIncome, 'RUB', true)}`;
-                const expenseByCat = {}, incomeByCat = {};
-                txs.forEach(tx => { const cat = getCategory(tx.categoryId); const name = cat?.name || 'Без категории'; if (tx.type === 'expense') expenseByCat[name] = (expenseByCat[name] || 0) + tx.amount; else incomeByCat[name] = (incomeByCat[name] || 0) + tx.amount; });
-                const expenseLabels = Object.keys(expenseByCat).map(name => { const pct = totalExpense > 0 ? Math.round((expenseByCat[name] / totalExpense) * 100) : 0; return `${name} (${pct}%)`; });
-                const incomeLabels = Object.keys(incomeByCat).map(name => { const pct = totalIncome > 0 ? Math.round((incomeByCat[name] / totalIncome) * 100) : 0; return `${name} (${pct}%)`; });
-                const colors = ['#e17055', '#d63031', '#fdcb6e', '#636e72', '#0984e3', '#a29bfe', '#e84393', '#00b894', '#6c5ce7', '#fd79a8', '#fab1a0', '#81ecec'];
+                const expenseByCat = {},
+                    incomeByCat = {};
+                txs.forEach(tx => { const cat = getCategory(tx.categoryId);
+                    const name = cat?.name || 'Без категории'; if (tx.type === 'expense') expenseByCat[name] = (
+                        expenseByCat[name] || 0) + tx.amount;
+                    else incomeByCat[name] = (incomeByCat[name] || 0) + tx.amount; });
+                const expenseLabels = Object.keys(expenseByCat).map(name => { const pct = totalExpense > 0 ? Math.round((
+                        expenseByCat[name] / totalExpense) * 100) : 0; return `${name} (${pct}%)`; });
+                const incomeLabels = Object.keys(incomeByCat).map(name => { const pct = totalIncome > 0 ? Math.round((
+                        incomeByCat[name] / totalIncome) * 100) : 0; return `${name} (${pct}%)`; });
+                const colors = ['#e17055', '#d63031', '#fdcb6e', '#636e72', '#0984e3', '#a29bfe', '#e84393', '#00b894',
+                    '#6c5ce7', '#fd79a8', '#fab1a0', '#81ecec'];
                 const surfaceColor = getComputedStyle(document.body).getPropertyValue('--surface').trim() || '#fff';
                 const textColor = getComputedStyle(document.body).getPropertyValue('--text').trim();
-                if (Object.keys(expenseByCat).length) { charts.expenseChart = new Chart(document.getElementById('expenseChart'), { type: 'doughnut', data: { labels: expenseLabels, datasets: [{ data: Object.values(expenseByCat), backgroundColor: colors.slice(0, expenseLabels.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
-                if (Object.keys(incomeByCat).length) { charts.incomeChart = new Chart(document.getElementById('incomeChart'), { type: 'doughnut', data: { labels: incomeLabels, datasets: [{ data: Object.values(incomeByCat), backgroundColor: ['#00b894', '#00cec9', '#6c5ce7', '#fd79a8', '#a29bfe', '#81ecec'].slice(0, incomeLabels.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
-                const assetsAccounts = appData.accounts.filter(a => !a.isDebt && !a.archived && a.balance !== 0);
-                if (assetsAccounts.length) { charts.assetsChart = new Chart(document.getElementById('assetsChart'), { type: 'doughnut', data: { labels: assetsAccounts.map(a => a.name), datasets: [{ data: assetsAccounts.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: assetsAccounts.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
-                const debtsAccounts = appData.accounts.filter(a => a.isDebt && !a.archived && a.balance !== 0);
-                if (debtsAccounts.length) { charts.debtsChart = new Chart(document.getElementById('debtsChart'), { type: 'doughnut', data: { labels: debtsAccounts.map(a => a.name), datasets: [{ data: debtsAccounts.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: debtsAccounts.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
-            }
+                if (Object.keys(expenseByCat).length) { charts.expenseChart = new Chart(document.getElementById(
+                        'expenseChart'), { type: 'doughnut', data: { labels: expenseLabels, datasets: [{ data: Object
+                                .values(expenseByCat), backgroundColor: colors.slice(0, expenseLabels.length),
+                            borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true,
+                            maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor,
+                                    font: { size: 11 }, padding: 12 } } } } }); }
+                if (Object.keys(incomeByCat).length) { charts.incomeChart = new Chart(document.getElementById('incomeChart'), {
+                        type: 'doughnut', data: { labels: incomeLabels, datasets: [{ data: Object.values(
+                                incomeByCat), backgroundColor: ['#00b894', '#00cec9', '#6c5ce7', '#fd79a8',
+                                '#a29bfe', '#81ecec'].slice(0, incomeLabels.length), borderWidth: 2,
+                            borderColor: surfaceColor }] }, options: { responsive: true,
+                            maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor,
+                                    font: { size: 11 }, padding: 12 } } } } }); }
 
+                // Фильтрация для диаграмм активов и долгов: исключаем архивные счета и счета с нулевым балансом
+                const assetsAccounts = appData.accounts.filter(a => !a.isDebt && !a.archived && a.balance !== 0);
+                if (assetsAccounts.length) { charts.assetsChart = new Chart(document.getElementById('assetsChart'), { type: 'doughnut',
+                        data: { labels: assetsAccounts.map(a => a.name), datasets: [{ data: assetsAccounts.map(a =>
+                                convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: assetsAccounts
+                                .map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: {
+                            responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom',
+                                    labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
+
+                const debtsAccounts = appData.accounts.filter(a => a.isDebt && !a.archived && a.balance !== 0);
+                if (debtsAccounts.length) { charts.debtsChart = new Chart(document.getElementById('debtsChart'), { type: 'doughnut',
+                        data: { labels: debtsAccounts.map(a => a.name), datasets: [{ data: debtsAccounts.map(a =>
+                                convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: debtsAccounts
+                                .map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: {
+                            responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom',
+                                    labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
+            }
             function renderMonthlyCharts() {
                 destroyCharts(['balanceMonthlyChart', 'incomeMonthlyChart', 'expenseMonthlyChart']);
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
                 const range = getMonthlyRange();
                 const textColor = getComputedStyle(document.body).getPropertyValue('--text').trim();
                 const filteredBalances = appData.monthlyBalances.filter(m => m.date >= range.start && m.date <= range.end);
-                const balanceLabels = filteredBalances.map(m => { const d = new Date(m.date); return d.toLocaleString('ru', { month: 'short', year: '2-digit' }); });
+                const balanceLabels = filteredBalances.map(m => { const d = new Date(m.date); return d.toLocaleString('ru', {
+                        month: 'short', year: '2-digit' }); });
                 const balanceData = filteredBalances.map(m => m.balance);
                 const months = [];
                 const startDate = new Date(range.start);
                 const endDate = new Date(range.end);
                 let cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-                while (cur <= endDate) { const y = cur.getFullYear(); const m = cur.getMonth(); const firstDay = new Date(y, m, 1); const lastDay = new Date(y, m + 1, 0); months.push({ label: firstDay.toLocaleString('ru', { month: 'short', year: '2-digit' }), start: formatLocalDate(firstDay), end: formatLocalDate(lastDay) }); cur.setMonth(cur.getMonth() + 1); }
-                const incomeData = months.map(m => { return getTransactionsInRange(m.start, m.end, accountId, true).filter(tx => tx.type === 'income').reduce((s, t) => s + t.amount, 0); });
-                const expenseData = months.map(m => { return getTransactionsInRange(m.start, m.end, accountId, true).filter(tx => tx.type === 'expense').reduce((s, t) => s + t.amount, 0); });
+                while (cur <= endDate) { const y = cur.getFullYear();
+                    const m = cur.getMonth();
+                    const firstDay = new Date(y, m, 1);
+                    const lastDay = new Date(y, m + 1, 0);
+                    months.push({ label: firstDay.toLocaleString('ru', { month: 'short', year: '2-digit' }), start: formatLocalDate(
+                            firstDay), end: formatLocalDate(lastDay) });
+                    cur.setMonth(cur.getMonth() + 1); }
+                const incomeData = months.map(m => { return getTransactionsInRange(m.start, m.end, accountId, true).filter(
+                    tx => tx.type === 'income').reduce((s, t) => s + t.amount, 0); });
+                const expenseData = months.map(m => { return getTransactionsInRange(m.start, m.end, accountId, true).filter(
+                    tx => tx.type === 'expense').reduce((s, t) => s + t.amount, 0); });
                 const monthLabels = months.map(m => m.label);
-                if (balanceLabels.length) { charts.balanceMonthlyChart = new Chart(document.getElementById('balanceMonthlyChart'), { type: 'line', data: { labels: balanceLabels, datasets: [{ label: 'Общий баланс', data: balanceData, borderColor: '#6c5ce7', backgroundColor: 'rgba(108,92,231,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
-                if (monthLabels.length) { charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), { type: 'line', data: { labels: monthLabels, datasets: [{ label: 'Доходы', data: incomeData, borderColor: '#00b894', backgroundColor: 'rgba(0,184,148,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
-                if (monthLabels.length) { charts.expenseMonthlyChart = new Chart(document.getElementById('expenseMonthlyChart'), { type: 'line', data: { labels: monthLabels, datasets: [{ label: 'Расходы', data: expenseData, borderColor: '#e17055', backgroundColor: 'rgba(225,112,85,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
+                if (balanceLabels.length) { charts.balanceMonthlyChart = new Chart(document.getElementById(
+                        'balanceMonthlyChart'), { type: 'line', data: { labels: balanceLabels, datasets: [{ label: 'Общий баланс',
+                                data: balanceData, borderColor: '#6c5ce7', backgroundColor: 'rgba(108,92,231,0.1)',
+                                fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true,
+                            maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } },
+                            y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
+                if (monthLabels.length) { charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), {
+                        type: 'line', data: { labels: monthLabels, datasets: [{ label: 'Доходы', data: incomeData,
+                                borderColor: '#00b894', backgroundColor: 'rgba(0,184,148,0.1)', fill: true,
+                                tension: 0.3, pointRadius: 3 }] }, options: { responsive: true,
+                            maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } },
+                            y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } });
+                    charts.expenseMonthlyChart = new Chart(document.getElementById('expenseMonthlyChart'), { type: 'line',
+                        data: { labels: monthLabels, datasets: [{ label: 'Расходы', data: expenseData, borderColor: '#e17055',
+                                backgroundColor: 'rgba(225,112,85,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                            scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v =>
+                                        formatCurrency(v, 'RUB', true) } } } } }); }
             }
-
             window.handleMonthlyPeriodChange = function() {
                 const period = document.getElementById('monthlyPeriod').value;
                 const customDiv = document.getElementById('monthlyCustomDateRange');
-                if (period === 'custom') { customDiv.style.display = 'flex'; if (!document.getElementById('monthlyDateFrom').value) { const today = formatLocalDate(new Date()); document.getElementById('monthlyDateFrom').value = today; document.getElementById('monthlyDateTo').value = today; } }
-                else { customDiv.style.display = 'none'; }
+                if (period === 'custom') { customDiv.style.display = 'flex'; if (!document.getElementById('monthlyDateFrom')
+                        .value) { const today = formatLocalDate(new Date());
+                        document.getElementById('monthlyDateFrom').value = today;
+                        document.getElementById('monthlyDateTo').value = today; } } else { customDiv.style.display =
+                    'none'; }
                 renderMonthlyCharts();
             };
-
             function renderAll() {
                 renderDashboard();
                 renderAccounts();
                 renderTransactions();
                 renderBudgets();
-                if (currentTab === 'stats') { renderStats(); renderMonthlyCharts(); }
+                if (currentTab === 'stats') { renderStats();
+                    renderMonthlyCharts(); }
                 updateAccountSelects();
             }
-
             function updateAccountSelects() {
-                const activeOpts = appData.accounts.filter(a => !a.archived).map(a => `<option value="${a.id}">${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`).join('');
-                const allOpts = appData.accounts.map(a => `<option value="${a.id}">${a.icon} ${a.name} ${a.isDebt?'(долг)':''}${a.archived?' [архив]':''}</option>`).join('');
-                ['transferFrom', 'transferTo'].forEach(id => { const el = document.getElementById(id); if (el) { const val = el.value; el.innerHTML = activeOpts; if ([...el.options].some(o => o.value === val)) el.value = val; } });
-                ['filterAccount', 'statsAccount'].forEach(id => { const el = document.getElementById(id); if (el) { const val = el.value; el.innerHTML = '<option value="all">Все счета</option>' + allOpts; if ([...el.options].some(o => o.value === val)) el.value = val; } });
+                const activeOpts = appData.accounts.filter(a => !a.archived).map(a =>
+                    `<option value="${a.id}">${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`).join('');
+                const allOpts = appData.accounts.map(a =>
+                    `<option value="${a.id}">${a.icon} ${a.name} ${a.isDebt?'(долг)':''}${a.archived?' [архив]':''}</option>`
+                    ).join('');
+                ['transferFrom', 'transferTo'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { const val = el.value;
+                        el.innerHTML = activeOpts; if ([...el.options].some(o => o.value === val)) el.value =
+                        val; }
+                });
+                ['filterAccount', 'statsAccount'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { const val = el.value;
+                        el.innerHTML = '<option value="all">Все счета</option>' + allOpts; if ([...el.options].some(
+                            o => o.value === val)) el.value = val; }
+                });
                 updateTransferForm();
             }
-
             function renderDashboard() {
                 const month = getMonthRange();
                 const txMonth = getTransactionsInRange(month.start, month.end, 'all', month.inclusiveEnd);
                 const income = txMonth.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
                 const expense = txMonth.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-                const totalAssetsRub = appData.accounts.filter(a => !a.isDebt).reduce((s, a) => s + convertCurrency(a.balance, a.currency, 'RUB'), 0);
-                const totalDebtsRub = appData.accounts.filter(a => a.isDebt).reduce((s, a) => s + convertCurrency(a.balance, a.currency, 'RUB'), 0);
+                const totalAssetsRub = appData.accounts.filter(a => !a.isDebt).reduce((s, a) => s + convertCurrency(a
+                    .balance, a.currency, 'RUB'), 0);
+                const totalDebtsRub = appData.accounts.filter(a => a.isDebt).reduce((s, a) => s + convertCurrency(a.balance,
+                    a.currency, 'RUB'), 0);
                 const netWorthRub = totalAssetsRub - totalDebtsRub;
                 const usdRate = currencyRates.USD || 90;
                 let displayedNetWorth, currencyLabel;
-                if (dashboardShowUSD) { displayedNetWorth = netWorthRub / usdRate; currencyLabel = 'USD'; document.getElementById('toggleBalanceCurrency').textContent = 'USD'; }
-                else { displayedNetWorth = netWorthRub; currencyLabel = 'RUB'; document.getElementById('toggleBalanceCurrency').textContent = 'RUB'; }
-                document.getElementById('dashNetWorth').textContent = formatAmountHidden(displayedNetWorth, currencyLabel, true);
-                document.getElementById('dashNetWorth').className = 'stat-value' + (netWorthRub >= 0 ? ' income' : ' expense');
+                if (dashboardShowUSD) { displayedNetWorth = netWorthRub / usdRate;
+                    currencyLabel = 'USD';
+                    document.getElementById('toggleBalanceCurrency').textContent = 'USD'; } else { displayedNetWorth =
+                    netWorthRub;
+                    currencyLabel = 'RUB';
+                    document.getElementById('toggleBalanceCurrency').textContent = 'RUB'; }
+                document.getElementById('dashNetWorth').textContent = formatAmountHidden(displayedNetWorth, currencyLabel,
+                    true);
+                document.getElementById('dashNetWorth').className = 'stat-value' + (netWorthRub >= 0 ? ' income' :
+                ' expense');
                 document.getElementById('dashIncome').textContent = formatAmountHidden(income, 'RUB', true);
                 document.getElementById('dashExpense').textContent = formatAmountHidden(expense, 'RUB', true);
                 document.getElementById('dashTotalDebts').textContent = formatAmountHidden(totalDebtsRub, 'RUB', true);
                 document.getElementById('dashTotalAssets').textContent = formatAmountHidden(totalAssetsRub, 'RUB', true);
                 const recent = appData.transactions.slice(0, 8);
-                document.getElementById('recentTransactions').innerHTML = recent.length ? recent.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
+                document.getElementById('recentTransactions').innerHTML = recent.length ? recent.map(tx => renderTxItem(
+                    tx)).join('') :
+                    '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
                 updateEyeButton();
             }
-
-            window.toggleDashboardCurrency = function() { dashboardShowUSD = !dashboardShowUSD; renderDashboard(); };
-
-            window.toggleArchiveView = function() { showArchivedAccounts = !showArchivedAccounts; renderAccounts(); };
-
+            window.toggleDashboardCurrency = function() { dashboardShowUSD = !dashboardShowUSD;
+                renderDashboard(); };
+            window.toggleArchiveView = function() {
+                showArchivedAccounts = !showArchivedAccounts;
+                renderAccounts();
+            };
             function showArchiveModal() {
                 const archivedAccounts = appData.accounts.filter(a => a.archived);
                 let listHtml = '';
@@ -1850,7 +2000,6 @@
                 `;
                 showModal(html);
             }
-
             function renderTxItem(tx) {
                 if (tx.type === 'transfer') {
                     const fromAcc = getAccount(tx.transferFrom);
@@ -1899,7 +2048,6 @@
                   <div class="tx-amount ${cls}">${sign}${formatAmountHidden(tx.amount, acc?.currency||'RUB')}</div>
                 </div>`;
             }
-
             function renderAccounts() {
                 const accountsToShow = appData.accounts.filter(a => showArchivedAccounts ? a.archived : !a.archived);
                 document.getElementById('allAccounts').innerHTML = accountsToShow.length ? accountsToShow.map(a => `
@@ -1910,7 +2058,6 @@
                 </div>`).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет счетов</div>';
                 updateAccountSelects();
             }
-
             function renderTransactions() {
                 updateAccountSelects();
                 const filterType = document.querySelector('#txFilters .filter-chip.active')?.dataset.filter || 'all';
@@ -1925,38 +2072,59 @@
                 else if (filterType === 'revaluation') txs = txs.filter(t => t.type === 'revaluation');
                 if (dateFrom) txs = txs.filter(t => t.date >= dateFrom);
                 if (dateTo) txs = txs.filter(t => t.date <= dateTo);
-                if (accountId !== 'all') txs = txs.filter(t => t.accountId === accountId || t.transferFrom === accountId || t.transferTo === accountId);
-                if (search) { txs = txs.filter(t => { if (t.type === 'transfer') { const fromAcc = getAccount(t.transferFrom); const toAcc = getAccount(t.transferTo); return (t.note || '').toLowerCase().includes(search) || (fromAcc?.name || '').toLowerCase().includes(search) || (toAcc?.name || '').toLowerCase().includes(search) || String(t.amount).includes(search); } const cat = getCategory(t.categoryId), acc = getAccount(t.accountId); return (cat?.name || '').toLowerCase().includes(search) || (t.note || '').toLowerCase().includes(search) || String(t.amount).includes(search) || (acc?.name || '').toLowerCase().includes(search) || t.tags.some(tag => tag.toLowerCase().includes(search)); }); }
-                document.getElementById('transactionList').innerHTML = txs.length ? txs.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
+                if (accountId !== 'all') txs = txs.filter(t => t.accountId === accountId || t.transferFrom ===
+                    accountId || t.transferTo === accountId);
+                if (search) { txs = txs.filter(t => { if (t.type === 'transfer') { const fromAcc = getAccount(t
+                            .transferFrom);
+                        const toAcc = getAccount(t.transferTo); return (t.note || '').toLowerCase().includes(
+                            search) || (fromAcc?.name || '').toLowerCase().includes(search) || (toAcc?.name ||
+                            '').toLowerCase().includes(search) || String(t.amount).includes(search); }
+                    const cat = getCategory(t.categoryId),
+                        acc = getAccount(t.accountId); return (cat?.name || '').toLowerCase().includes(
+                        search) || (t.note || '').toLowerCase().includes(search) || String(t.amount).includes(
+                        search) || (acc?.name || '').toLowerCase().includes(search) || t.tags.some(tag => tag
+                        .toLowerCase().includes(search)); }); }
+                document.getElementById('transactionList').innerHTML = txs.length ? txs.map(tx => renderTxItem(tx)).join(
+                    '') : '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
             }
-
             document.getElementById('txFilters').addEventListener('click', function(e) {
-                if (e.target.classList.contains('filter-chip')) { this.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active')); e.target.classList.add('active'); renderTransactions(); }
+                if (e.target.classList.contains('filter-chip')) { this.querySelectorAll('.filter-chip').forEach(c => c
+                        .classList.remove('active'));
+                    e.target.classList.add('active');
+                    renderTransactions(); }
             });
-
             function renderBudgets() {
                 const month = getMonthRange();
                 const list = document.getElementById('budgetList');
-                if (!appData.budgets.length) { list.innerHTML = '<div class="empty-state"><div class="icon">🎯</div>Нет бюджетов</div>'; return; }
-                list.innerHTML = appData.budgets.map(b => { const cat = getCategory(b.categoryId); const txs = getTransactionsInRange(month.start, month.end, b.accountId, month.inclusiveEnd).filter(t => t.type === 'expense' && t.categoryId === b.categoryId); const spent = txs.reduce((s, t) => s + t.amount, 0); const pct = Math.min(100, Math.round((spent / b.amount) * 100)); const barColor = pct > 90 ? '#e17055' : pct > 60 ? '#fdcb6e' : '#00b894'; return `
+                if (!appData.budgets.length) { list.innerHTML =
+                    '<div class="empty-state"><div class="icon">🎯</div>Нет бюджетов</div>'; return; }
+                list.innerHTML = appData.budgets.map(b => { const cat = getCategory(b.categoryId);
+                    const txs = getTransactionsInRange(month.start, month.end, b.accountId, month.inclusiveEnd).filter(
+                        t => t.type === 'expense' && t.categoryId === b.categoryId);
+                    const spent = txs.reduce((s, t) => s + t.amount, 0);
+                    const pct = Math.min(100, Math.round((spent / b.amount) * 100));
+                    const barColor = pct > 90 ? '#e17055' : pct > 60 ? '#fdcb6e' : '#00b894'; return `
                     <div class="budget-item" onclick="showBudgetModal('${b.id}')">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                       <span><strong>${cat?.icon||'📌'} ${cat?.name||'?'}</strong> <span style="font-size:0.75rem;color:var(--text2);">${b.period==='monthly'?'мес':'нед'}</span></span>
                       <span style="font-weight:700;">${formatAmountHidden(spent,'RUB')} / ${formatAmountHidden(b.amount,'RUB')}</span>
                     </div>
                     <div class="budget-bar-wrap"><div class="budget-bar-fill" style="width:${pct}%;background:${barColor};"></div></div>
-                    <div style="font-size:0.7rem;color:var(--text2);margin-top:2px;">${pct}% использовано</div></div>`; }).join('');
+                    <div style="font-size:0.7rem;color:var(--text2);margin-top:2px;">${pct}% использовано</div></div>`; })
+                    .join('');
             }
-
             const mobileMoreMenu = document.getElementById('mobileMoreMenu');
             const mobileMoreBtn = document.getElementById('mobileMoreBtn');
-            function toggleMobileMoreMenu() { mobileMoreMenu.style.display = (mobileMoreMenu.style.display === 'flex') ? 'none' : 'flex'; }
+            function toggleMobileMoreMenu() { mobileMoreMenu.style.display = (mobileMoreMenu.style.display === 'flex') ?
+                    'none' : 'flex'; }
             function hideMobileMoreMenu() { mobileMoreMenu.style.display = 'none'; }
-            mobileMoreBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMobileMoreMenu(); });
-            document.addEventListener('click', (event) => { if (!mobileMoreMenu.contains(event.target) && event.target !== mobileMoreBtn) hideMobileMoreMenu(); });
+            mobileMoreBtn.addEventListener('click', (e) => { e.stopPropagation();
+                toggleMobileMoreMenu(); });
+            document.addEventListener('click', (event) => { if (!mobileMoreMenu.contains(event.target) && event.target !==
+                    mobileMoreBtn) hideMobileMoreMenu(); });
             document.getElementById('archiveNavBtn').addEventListener('click', showArchiveModal);
-            document.getElementById('mobileArchiveBtn').addEventListener('click', () => { showArchiveModal(); hideMobileMoreMenu(); });
-
+            document.getElementById('mobileArchiveBtn').addEventListener('click', () => { showArchiveModal();
+                hideMobileMoreMenu(); });
             async function init() {
                 await loadRates();
                 appData = await loadData();
@@ -1976,7 +2144,6 @@
                 renderAll();
                 switchTab('dashboard');
             }
-
             window.closeModal = closeModal;
             window.showTransactionModal = showTransactionModal;
             window.showAccountModal = showAccountModal;
@@ -2007,7 +2174,6 @@
             window.saveEditCategory = saveEditCategory;
             window.toggleHideAmounts = toggleHideAmounts;
             window.toggleArchiveView = toggleArchiveView;
-
             init();
         })();
     </script>
