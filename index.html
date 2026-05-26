@@ -627,6 +627,17 @@
             .stat-row-two {
                 grid-template-columns: 1fr;
             }
+            /* Закрашиваем щель под нижним меню */
+            body::after {
+                content: '';
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 15px;
+                background: var(--surface);
+                z-index: 49;
+            }
         }
     </style>
 </head>
