@@ -469,7 +469,7 @@
         .mobile-nav {
             display: none;
             position: fixed;
-            bottom: 0;
+            bottom: 15px;
             left: 0;
             right: 0;
             background: var(--surface);
@@ -798,7 +798,6 @@
         (function() {
             // ---------- PWA: динамический манифест и service worker ----------
             if ('serviceWorker' in navigator) {
-                // Устанавливаем манифест через Blob URL
                 const manifest = {
                     name: "MoneyFlow",
                     short_name: "MoneyFlow",
@@ -824,7 +823,6 @@
                 const manifestURL = URL.createObjectURL(manifestBlob);
                 document.getElementById('manifestPlaceholder').href = manifestURL;
 
-                // Service worker code (строкой)
                 const swCode = `
                     const CACHE_NAME = 'moneyflow-v1';
                     const ASSETS_TO_CACHE = [
