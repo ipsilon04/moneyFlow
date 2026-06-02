@@ -748,8 +748,8 @@
                         <div class="card"><div class="card-header">Доходы по категориям</div><div class="chart-container"><canvas id="incomeChart"></canvas></div><div id="incomeDetail" style="margin-top:12px;"></div></div>
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                        <div class="card"><div class="card-header">Активы по счетам</div><div class="chart-container"><canvas id="assetsChart"></canvas></div></div>
-                        <div class="card"><div class="card-header">Долги по счетам</div><div class="chart-container"><canvas id="debtsChart"></canvas></div></div>
+                        <div class="card"><div class="card-header">Активы по счетам</div><div class="chart-container"><canvas id="assetsChart"></canvas></div><div id="assetsDetail" style="margin-top:12px;"></div></div>
+                        <div class="card"><div class="card-header">Долги по счетам</div><div class="chart-container"><canvas id="debtsChart"></canvas></div><div id="debtsDetail" style="margin-top:12px;"></div></div>
                     </div>
                     <div class="card">
                         <div class="card-header">Помесячная динамика</div>
@@ -1748,16 +1748,13 @@
                 const totalExpense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
                 const totalIncome = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
                 
-                // Категории с суммами
                 const expenseByCat = {}, incomeByCat = {};
                 txs.forEach(tx => { const cat = getCategory(tx.categoryId); const name = cat?.name || 'Без категории'; if (tx.type === 'expense') expenseByCat[name] = (expenseByCat[name] || 0) + tx.amount; else incomeByCat[name] = (incomeByCat[name] || 0) + tx.amount; });
 
-                // Сортировка по убыванию суммы
                 const sortByValue = (obj) => Object.entries(obj).sort(([,a], [,b]) => b - a);
                 const sortedExpense = sortByValue(expenseByCat);
                 const sortedIncome = sortByValue(incomeByCat);
 
-                // Формирование списков под диаграммами
                 const renderCatList = (entries, total, type) => {
                     if (entries.length === 0) return '<div class="empty-state">Нет данных</div>';
                     return entries.map(([name, sum]) => {
@@ -1780,7 +1777,24 @@
                     ${renderCatList(sortedIncome, totalIncome, 'income')}
                 `;
 
-                // Диаграммы: используем отсортированные данные
+                // Активы и долги
+                const assetsAccounts = appData.accounts.filter(a => !a.isDebt && !a.archived);
+                const sortedAssets = assetsAccounts.sort((a,b) => convertCurrency(b.balance, b.currency, 'RUB') - convertCurrency(a.balance, a.currency, 'RUB'));
+                const debtsAccounts = appData.accounts.filter(a => a.isDebt && !a.archived);
+                const sortedDebts = debtsAccounts.sort((a,b) => convertCurrency(b.balance, b.currency, 'RUB') - convertCurrency(a.balance, a.currency, 'RUB'));
+
+                document.getElementById('assetsDetail').innerHTML = sortedAssets.length ? sortedAssets.map(a => `
+                    <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border);">
+                        <span>${a.icon} ${a.name}</span>
+                        <span style="font-weight:600;">${formatCurrency(convertCurrency(a.balance, a.currency, 'RUB'), 'RUB', true)}</span>
+                    </div>`).join('') : '<div class="empty-state">Нет активов</div>';
+
+                document.getElementById('debtsDetail').innerHTML = sortedDebts.length ? sortedDebts.map(a => `
+                    <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border);">
+                        <span>${a.icon} ${a.name}</span>
+                        <span style="font-weight:600;">${formatCurrency(convertCurrency(a.balance, a.currency, 'RUB'), 'RUB', true)}</span>
+                    </div>`).join('') : '<div class="empty-state">Нет долгов</div>';
+
                 const expenseLabels = sortedExpense.map(([name, sum]) => { const pct = totalExpense > 0 ? Math.round((sum / totalExpense) * 100) : 0; return `${name} (${pct}%)`; });
                 const expenseValues = sortedExpense.map(([, sum]) => sum);
                 const incomeLabels = sortedIncome.map(([name, sum]) => { const pct = totalIncome > 0 ? Math.round((sum / totalIncome) * 100) : 0; return `${name} (${pct}%)`; });
@@ -1789,12 +1803,12 @@
                 const colors = ['#e17055', '#d63031', '#fdcb6e', '#636e72', '#0984e3', '#a29bfe', '#e84393', '#00b894', '#6c5ce7', '#fd79a8', '#fab1a0', '#81ecec'];
                 const surfaceColor = getComputedStyle(document.body).getPropertyValue('--surface').trim() || '#fff';
                 const textColor = getComputedStyle(document.body).getPropertyValue('--text').trim();
-                if (expenseValues.length) { charts.expenseChart = new Chart(document.getElementById('expenseChart'), { type: 'doughnut', data: { labels: expenseLabels, datasets: [{ data: expenseValues, backgroundColor: colors.slice(0, expenseValues.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
-                if (incomeValues.length) { charts.incomeChart = new Chart(document.getElementById('incomeChart'), { type: 'doughnut', data: { labels: incomeLabels, datasets: [{ data: incomeValues, backgroundColor: ['#00b894', '#00cec9', '#6c5ce7', '#fd79a8', '#a29bfe', '#81ecec'].slice(0, incomeValues.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
-                const assetsAccounts = appData.accounts.filter(a => !a.isDebt && !a.archived && a.balance !== 0);
-                if (assetsAccounts.length) { charts.assetsChart = new Chart(document.getElementById('assetsChart'), { type: 'doughnut', data: { labels: assetsAccounts.map(a => a.name), datasets: [{ data: assetsAccounts.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: assetsAccounts.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
-                const debtsAccounts = appData.accounts.filter(a => a.isDebt && !a.archived && a.balance !== 0);
-                if (debtsAccounts.length) { charts.debtsChart = new Chart(document.getElementById('debtsChart'), { type: 'doughnut', data: { labels: debtsAccounts.map(a => a.name), datasets: [{ data: debtsAccounts.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: debtsAccounts.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, padding: 12 } } } } }); }
+                const noLegend = { display: false };
+
+                if (expenseValues.length) { charts.expenseChart = new Chart(document.getElementById('expenseChart'), { type: 'doughnut', data: { labels: expenseLabels, datasets: [{ data: expenseValues, backgroundColor: colors.slice(0, expenseValues.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
+                if (incomeValues.length) { charts.incomeChart = new Chart(document.getElementById('incomeChart'), { type: 'doughnut', data: { labels: incomeLabels, datasets: [{ data: incomeValues, backgroundColor: ['#00b894', '#00cec9', '#6c5ce7', '#fd79a8', '#a29bfe', '#81ecec'].slice(0, incomeValues.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
+                if (sortedAssets.length) { charts.assetsChart = new Chart(document.getElementById('assetsChart'), { type: 'doughnut', data: { labels: sortedAssets.map(a => a.name), datasets: [{ data: sortedAssets.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: sortedAssets.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
+                if (sortedDebts.length) { charts.debtsChart = new Chart(document.getElementById('debtsChart'), { type: 'doughnut', data: { labels: sortedDebts.map(a => a.name), datasets: [{ data: sortedDebts.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: sortedDebts.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
             }
 
             function renderMonthlyCharts() {
