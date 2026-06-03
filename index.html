@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MoneyFlow — Учёт доходов и расходов</title>
     
-    <!-- PWA meta tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MoneyFlow">
@@ -1898,7 +1897,6 @@
                                 appData.accounts.push(toAcc);
                                 importedAccounts++;
                             }
-                            // поиск категории по имени (расходная)
                             let categoryId = null;
                             if (categoryName) {
                                 const cat = appData.categories.find(c => c.name === categoryName && c.type === 'expense');
@@ -2204,25 +2202,30 @@
 
             window.showCategoryTransactionsModal = function(catId, type) {
                 const range = getStatsRange();
-                const txs = [];
-                if (catId && getCategory(catId)?.type === 'expense') {
+                let txs = [];
+                if (catId) {
+                    // есть категория: ищем транзакции данного типа с этой категорией
                     const regular = appData.transactions.filter(tx => {
                         if (tx.type !== type) return false;
                         if (tx.date < range.start) return false;
                         if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return false;
-                        return catId ? tx.categoryId === catId : !tx.categoryId;
-                    });
-                    txs.push(...regular);
-                    const transfers = appData.transactions.filter(tx => {
-                        if (tx.type !== 'transfer') return false;
-                        const toAcc = getAccount(tx.transferTo);
-                        if (!toAcc || !toAcc.isDebt) return false;
-                        if (tx.date < range.start) return false;
-                        if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return false;
                         return tx.categoryId === catId;
                     });
-                    txs.push(...transfers);
+                    txs.push(...regular);
+                    // если это расход, добавляем переводы на кредитный счет с этой категорией
+                    if (type === 'expense') {
+                        const transfers = appData.transactions.filter(tx => {
+                            if (tx.type !== 'transfer') return false;
+                            const toAcc = getAccount(tx.transferTo);
+                            if (!toAcc || !toAcc.isDebt) return false;
+                            if (tx.date < range.start) return false;
+                            if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return false;
+                            return tx.categoryId === catId;
+                        });
+                        txs.push(...transfers);
+                    }
                 } else {
+                    // без категории: ищем транзакции данного типа с отсутствующей категорией
                     const regular = appData.transactions.filter(tx => {
                         if (tx.type !== type) return false;
                         if (tx.date < range.start) return false;
@@ -2239,7 +2242,7 @@
                     }
                     return s + tx.amount;
                 }, 0);
-                const catName = catId && getCategory(catId) ? getCategory(catId).name : (type==='income'?'Доходы':'Расходы');
+                const catName = catId ? (getCategory(catId)?.name || (type==='income'?'Доходы':'Расходы')) : (type==='income'?'Доходы без категории':'Расходы без категории');
                 const html = `
                     <h2>${catName} (${type==='income'?'Доходы':'Расходы'})</h2>
                     <div style="margin-bottom:12px; font-weight:600;">Всего: ${formatCurrency(total, 'RUB', true)}</div>
