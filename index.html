@@ -1318,7 +1318,6 @@
                 const idx = appData.transactions.findIndex(t => t.id === editingId);
                 if (idx >= 0) appData.transactions[idx] = newTx;
                 applyTransfer(newTx, false);
-                appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 save();
                 closeModal();
                 renderAll();
@@ -1467,7 +1466,6 @@
                 else { appData.transactions.push(txData); }
                 if (type === 'revaluation') { const acc = getAccount(accountId); if (acc) acc.balance += amount; }
                 else { updateAccountBalance(txData, false); }
-                appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 save();
                 closeModal();
                 processRecurring();
@@ -1505,7 +1503,7 @@
                         nextDate = getNextRecurringDate(nextDate, tx.recurringPeriod);
                     }
                 });
-                if (changed) { appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)); save(); }
+                if (changed) { save(); }
             }
 
             function getNextRecurringDate(dateStr, period) {
@@ -1638,7 +1636,6 @@
                 };
                 applyTransfer(transferTx, false);
                 appData.transactions.push(transferTx);
-                appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 save();
                 renderAll();
                 alert('Перевод выполнен!');
@@ -1847,7 +1844,7 @@
                 let importedAccounts = 0, importedCategories = 0, importedTransactions = 0;
                 let section = null;
                 const importedBalances = [];
-                const transferTxs = []; // сначала соберём переводы, потом применим
+                const transferTxs = [];
                 for (let i = 0; i < lines.length; i++) {
                     const line = lines[i].trim();
                     if (!line) continue;
@@ -1886,7 +1883,8 @@
                             const convertedAmount = cols[6] ? parseFloat(cols[6].replace(',', '.')) : undefined;
                             const principal = cols[7] ? parseFloat(cols[7].replace(',', '.')) : undefined;
                             const interest = cols[8] ? parseFloat(cols[8].replace(',', '.')) : undefined;
-                            const categoryId = cols[9]?.trim() || undefined;
+                            const categoryIdRaw = cols[9]?.trim();
+                            const categoryId = categoryIdRaw && appData.categories.find(c => c.id === categoryIdRaw) ? categoryIdRaw : null;
                             const note = cols[10]?.trim() || '';
                             const tags = cols[11] ? cols[11].split(' ').filter(Boolean) : [];
                             let fromAcc = appData.accounts.find(a => a.name === fromName);
@@ -1928,17 +1926,16 @@
                             else if (typeStr.includes('расход')) { type = 'expense'; categoryType = 'expense'; }
                             else if (typeStr.includes('изменение цены')) { type = 'revaluation'; categoryType = 'revaluation'; }
                             else continue;
-                            const accountName = cols[4]?.trim() || 'Основной', categoryId = cols[9]?.trim() || null, note = cols[10]?.trim() || '', tags = cols[11] ? cols[11].split(' ').filter(Boolean) : [];
+                            const accountName = cols[4]?.trim() || 'Основной';
+                            const categoryIdRaw = cols[9]?.trim();
+                            const categoryId = categoryIdRaw && appData.categories.find(c => c.id === categoryIdRaw) ? categoryIdRaw : null;
+                            const note = cols[10]?.trim() || '';
+                            const tags = cols[11] ? cols[11].split(' ').filter(Boolean) : [];
                             let account = appData.accounts.find(a => a.name === accountName);
                             if (!account) {
                                 account = { id: genId(), name: accountName, currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💳', isDebt: false, archived: false };
                                 appData.accounts.push(account);
                                 importedAccounts++;
-                            }
-                            if (categoryId && !appData.categories.find(c => c.id === categoryId)) {
-                                // Создаём категорию если нет
-                                appData.categories.push({ id: categoryId, name: categoryId, type: categoryType, icon: '📌', color: '#6c5ce7' });
-                                importedCategories++;
                             }
                             const tx = { id: genId(), type, amount, accountId: account.id, categoryId: categoryId, date, note, tags, isRecurring: false, recurringPeriod: null };
                             appData.transactions.push(tx);
@@ -1954,7 +1951,6 @@
                         }
                     }
                 }
-                // Применяем переводы
                 transferTxs.forEach(tx => {
                     appData.transactions.push(tx);
                     applyTransfer(tx, false);
@@ -1965,7 +1961,6 @@
                         if (acc) acc.balance = b.amount;
                     });
                 }
-                appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 save();
                 return { accounts: importedAccounts, categories: importedCategories, transactions: importedTransactions };
             }
@@ -2320,7 +2315,7 @@
                 document.getElementById('dashExpense').textContent = formatAmountHidden(expense, 'RUB', true);
                 document.getElementById('dashTotalDebts').textContent = formatAmountHidden(totalDebtsRub, 'RUB', true);
                 document.getElementById('dashTotalAssets').textContent = formatAmountHidden(totalAssetsRub, 'RUB', true);
-                const recent = appData.transactions.slice(0, 8);
+                const recent = [...appData.transactions].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 8);
                 document.getElementById('recentTransactions').innerHTML = recent.length ? recent.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
                 updateEyeButton();
             }
@@ -2434,6 +2429,7 @@
                 if (dateTo) txs = txs.filter(t => t.date <= dateTo);
                 if (accountId !== 'all') txs = txs.filter(t => t.accountId === accountId || t.transferFrom === accountId || t.transferTo === accountId);
                 if (search) { txs = txs.filter(t => { if (t.type === 'transfer') { const fromAcc = getAccount(t.transferFrom); const toAcc = getAccount(t.transferTo); return (t.note || '').toLowerCase().includes(search) || (fromAcc?.name || '').toLowerCase().includes(search) || (toAcc?.name || '').toLowerCase().includes(search) || String(t.amount).includes(search); } const cat = getCategory(t.categoryId), acc = getAccount(t.accountId); return (cat?.name || '').toLowerCase().includes(search) || (t.note || '').toLowerCase().includes(search) || String(t.amount).includes(search) || (acc?.name || '').toLowerCase().includes(search) || t.tags.some(tag => tag.toLowerCase().includes(search)); }); }
+                txs.sort((a,b) => b.date.localeCompare(a.date));
                 document.getElementById('transactionList').innerHTML = txs.length ? txs.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
             }
 
