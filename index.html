@@ -1844,7 +1844,6 @@
                 let importedAccounts = 0, importedCategories = 0, importedTransactions = 0;
                 let section = null;
                 const importedBalances = [];
-                const transferTxs = [];
                 for (let i = 0; i < lines.length; i++) {
                     const line = lines[i].trim();
                     if (!line) continue;
@@ -1916,7 +1915,8 @@
                                 isRecurring: false,
                                 recurringPeriod: null
                             };
-                            transferTxs.push(tx);
+                            applyTransfer(tx, false);
+                            appData.transactions.push(tx);
                             importedTransactions++;
                         } else {
                             const amount = parseFloat(cols[2]?.replace(',', '.'));
@@ -1938,9 +1938,9 @@
                                 importedAccounts++;
                             }
                             const tx = { id: genId(), type, amount, accountId: account.id, categoryId: categoryId, date, note, tags, isRecurring: false, recurringPeriod: null };
-                            appData.transactions.push(tx);
                             if (type === 'revaluation') { account.balance += amount; }
                             else { updateAccountBalance(tx, false); }
+                            appData.transactions.push(tx);
                             importedTransactions++;
                         }
                     } else if (section === 'балансы счетов') {
@@ -1951,10 +1951,6 @@
                         }
                     }
                 }
-                transferTxs.forEach(tx => {
-                    appData.transactions.push(tx);
-                    applyTransfer(tx, false);
-                });
                 if (importedBalances.length > 0) {
                     importedBalances.forEach(b => {
                         const acc = appData.accounts.find(a => a.name === b.name && a.currency === b.currency);
