@@ -1182,17 +1182,30 @@
 
             function showTransferEditModal(tx) {
                 editingId = tx.id;
+                const fromAcc = getAccount(tx.transferFrom);
+                const toAcc = getAccount(tx.transferTo);
                 const fromOptions = appData.accounts.filter(a => !a.archived).map(a =>
                     `<option value="${a.id}" ${tx.transferFrom===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`).join('');
                 const toOptions = appData.accounts.filter(a => !a.archived).map(a =>
                     `<option value="${a.id}" ${tx.transferTo===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`).join('');
+                let amountBlockHtml = '';
+                if (toAcc && toAcc.isDebt && fromAcc && !fromAcc.isDebt) {
+                    amountBlockHtml = `
+                        <div class="form-row">
+                            <div class="form-group"><label>Тело долга</label><input type="number" id="transferPrincipalEdit" value="${tx.principal||0}" step="0.01" min="0"></div>
+                            <div class="form-group"><label>Проценты</label><input type="number" id="transferInterestEdit" value="${tx.interest||0}" step="0.01" min="0"></div>
+                        </div>`;
+                } else {
+                    amountBlockHtml = `
+                        <div class="form-group"><label>Сумма (в валюте счета отправителя)</label><input type="number" id="transferAmountEdit" value="${tx.amount}" step="0.01" min="0.01"></div>`;
+                }
                 const html = `
                 <h2>Редактировать перевод</h2>
                 <div class="form-row">
                   <div class="form-group"><label>Со счета</label><select id="transferFromEdit">${fromOptions}</select></div>
                   <div class="form-group"><label>На счёт</label><select id="transferToEdit">${toOptions}</select></div>
                 </div>
-                <div class="form-group"><label>Сумма (в валюте счета отправителя)</label><input type="number" id="transferAmountEdit" value="${tx.amount}" step="0.01" min="0.01"></div>
+                ${amountBlockHtml}
                 <div class="form-group"><label>Дата</label><input type="date" id="transferDateEdit" value="${tx.date}"></div>
                 <div class="form-group"><label>Заметка</label><input id="transferNoteEdit" value="${tx.note||''}" placeholder="Описание..."></div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
@@ -1217,17 +1230,42 @@
             window.saveTransferEdit = function() {
                 const fromId = document.getElementById('transferFromEdit').value;
                 const toId = document.getElementById('transferToEdit').value;
-                const amount = parseFloat(document.getElementById('transferAmountEdit').value);
                 const date = document.getElementById('transferDateEdit').value;
                 const note = document.getElementById('transferNoteEdit').value.trim();
                 if (!fromId || !toId || fromId === toId) return alert('Выберите разные счета');
-                if (!amount || amount <= 0) return alert('Введите сумму');
                 const fromAcc = getAccount(fromId);
                 const toAcc = getAccount(toId);
-                const convertedAmount = convertCurrency(amount, fromAcc.currency, toAcc.currency);
                 const oldTx = appData.transactions.find(t => t.id === editingId);
                 if (oldTx) applyTransfer(oldTx, true);
-                const newTx = { ...oldTx, transferFrom: fromId, transferTo: toId, amount: amount, convertedAmount: convertedAmount, date: date, note: note || `Перевод: ${fromAcc.name} → ${toAcc.name}`, tags: ['перевод'], accountId: fromId };
+                
+                let amount, principal, interest, convertedAmount;
+                if (toAcc.isDebt && !fromAcc.isDebt) {
+                    principal = parseFloat(document.getElementById('transferPrincipalEdit').value) || 0;
+                    interest = parseFloat(document.getElementById('transferInterestEdit').value) || 0;
+                    if (principal === 0 && interest === 0) return alert('Введите тело долга или проценты');
+                    amount = principal + interest;
+                    convertedAmount = convertCurrency(principal, fromAcc.currency, toAcc.currency);
+                } else {
+                    amount = parseFloat(document.getElementById('transferAmountEdit').value);
+                    if (!amount || amount <= 0) return alert('Введите сумму');
+                    convertedAmount = convertCurrency(amount, fromAcc.currency, toAcc.currency);
+                    principal = undefined;
+                    interest = undefined;
+                }
+                
+                const newTx = {
+                    ...oldTx,
+                    transferFrom: fromId,
+                    transferTo: toId,
+                    amount: amount,
+                    convertedAmount: convertedAmount,
+                    principal: principal,
+                    interest: interest,
+                    date: date,
+                    note: note || `Перевод: ${fromAcc.name} → ${toAcc.name}`,
+                    tags: ['перевод'],
+                    accountId: fromId
+                };
                 const idx = appData.transactions.findIndex(t => t.id === editingId);
                 if (idx >= 0) appData.transactions[idx] = newTx;
                 applyTransfer(newTx, false);
@@ -1242,19 +1280,52 @@
                 const toAcc = getAccount(tx.transferTo);
                 if (!fromAcc || !toAcc) return;
                 const amount = tx.amount;
-                const convertedAmount = tx.convertedAmount || convertCurrency(amount, fromAcc.currency, toAcc.currency);
+                const principal = tx.principal;
+                const interest = tx.interest || 0;
+                const fromCur = fromAcc.currency;
+                const toCur = toAcc.currency;
                 const fromIsDebt = fromAcc.isDebt;
                 const toIsDebt = toAcc.isDebt;
-                if (reverse) {
-                    if (toIsDebt && !fromIsDebt) { fromAcc.balance += amount; toAcc.balance += convertedAmount; }
-                    else if (fromIsDebt && !toIsDebt) { fromAcc.balance -= amount; toAcc.balance -= convertedAmount; }
-                    else if (fromIsDebt && toIsDebt) { fromAcc.balance -= amount; toAcc.balance += convertedAmount; }
-                    else { fromAcc.balance += amount; toAcc.balance -= convertedAmount; }
+                
+                if (toIsDebt && !fromIsDebt) {
+                    // перевод на долг: principal + interest уходят с отправителя, principal конвертируется в погашение долга
+                    const convertedPrincipal = tx.convertedAmount || convertCurrency(principal ?? amount, fromCur, toCur);
+                    if (reverse) {
+                        fromAcc.balance += (principal ?? amount) + interest;
+                        toAcc.balance += convertedPrincipal;
+                    } else {
+                        fromAcc.balance -= (principal ?? amount) + interest;
+                        toAcc.balance -= convertedPrincipal;
+                    }
+                } else if (fromIsDebt && !toIsDebt) {
+                    // перевод с долга: обратная ситуация не рассматривается, но оставим как было
+                    const convertedAmount = tx.convertedAmount || convertCurrency(amount, fromCur, toCur);
+                    if (reverse) {
+                        fromAcc.balance -= amount;
+                        toAcc.balance -= convertedAmount;
+                    } else {
+                        fromAcc.balance += amount;
+                        toAcc.balance += convertedAmount;
+                    }
+                } else if (fromIsDebt && toIsDebt) {
+                    const convertedAmount = tx.convertedAmount || convertCurrency(amount, fromCur, toCur);
+                    if (reverse) {
+                        fromAcc.balance -= amount;
+                        toAcc.balance += convertedAmount;
+                    } else {
+                        fromAcc.balance += amount;
+                        toAcc.balance -= convertedAmount;
+                    }
                 } else {
-                    if (toIsDebt && !fromIsDebt) { fromAcc.balance -= amount; toAcc.balance -= convertedAmount; }
-                    else if (fromIsDebt && !toIsDebt) { fromAcc.balance += amount; toAcc.balance += convertedAmount; }
-                    else if (fromIsDebt && toIsDebt) { fromAcc.balance += amount; toAcc.balance -= convertedAmount; }
-                    else { fromAcc.balance -= amount; toAcc.balance += convertedAmount; }
+                    // обычный перевод между активами
+                    const convertedAmount = tx.convertedAmount || convertCurrency(amount, fromCur, toCur);
+                    if (reverse) {
+                        fromAcc.balance += amount;
+                        toAcc.balance -= convertedAmount;
+                    } else {
+                        fromAcc.balance -= amount;
+                        toAcc.balance += convertedAmount;
+                    }
                 }
                 fromAcc.balance = Math.round(fromAcc.balance * 100) / 100;
                 toAcc.balance = Math.round(toAcc.balance * 100) / 100;
@@ -1429,35 +1500,50 @@
                 const fromAcc = getAccount(fromId);
                 const toAcc = getAccount(toId);
                 if (!fromAcc || !toAcc) return;
-                let transferAmount = 0;
-                let convertedAmount = 0;
-                let interest = 0;
+                let amount, principal, interest, convertedAmount;
                 if (toAcc.isDebt && !fromAcc.isDebt) {
-                    const principal = parseFloat(document.getElementById('transferPrincipal').value) || 0;
+                    principal = parseFloat(document.getElementById('transferPrincipal').value) || 0;
                     interest = parseFloat(document.getElementById('transferInterest').value) || 0;
                     if (principal < 0 || interest < 0) return alert('Суммы не могут быть отрицательными');
                     if (principal === 0 && interest === 0) return alert('Введите тело долга или проценты');
-                    transferAmount = principal + interest;
+                    amount = principal + interest;
                     convertedAmount = convertCurrency(principal, fromAcc.currency, toAcc.currency);
-                    document.getElementById('transferPrincipal').value = '';
-                    document.getElementById('transferInterest').value = '';
                 } else {
-                    transferAmount = parseFloat(document.getElementById('transferAmount').value);
-                    if (!transferAmount || transferAmount <= 0) return alert('Введите сумму');
-                    convertedAmount = convertCurrency(transferAmount, fromAcc.currency, toAcc.currency);
-                    document.getElementById('transferAmount').value = '';
+                    amount = parseFloat(document.getElementById('transferAmount').value);
+                    if (!amount || amount <= 0) return alert('Введите сумму');
+                    convertedAmount = convertCurrency(amount, fromAcc.currency, toAcc.currency);
+                    principal = undefined;
+                    interest = undefined;
                 }
-                const transferTx = { id: genId(), type: 'transfer', amount: transferAmount, accountId: fromId, date, note: `Перевод: ${fromAcc.name} → ${toAcc.name}`, tags: ['перевод'], transferFrom: fromId, transferTo: toId, convertedAmount: convertedAmount, isRecurring: false, recurringPeriod: null };
+                const transferTx = {
+                    id: genId(),
+                    type: 'transfer',
+                    amount: amount,
+                    accountId: fromId,
+                    date,
+                    note: `Перевод: ${fromAcc.name} → ${toAcc.name}`,
+                    tags: ['перевод'],
+                    transferFrom: fromId,
+                    transferTo: toId,
+                    convertedAmount: convertedAmount,
+                    principal: principal,
+                    interest: interest,
+                    isRecurring: false,
+                    recurringPeriod: null
+                };
                 applyTransfer(transferTx, false);
                 appData.transactions.push(transferTx);
-                if (interest > 0) {
-                    const interestTx = { id: genId(), type: 'expense', amount: interest, accountId: fromId, categoryId: null, date, note: `Проценты по кредиту: ${toAcc.name}`, tags: ['кредит', 'проценты'], isRecurring: false, recurringPeriod: null };
-                    appData.transactions.push(interestTx);
-                }
                 appData.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 save();
                 renderAll();
                 alert('Перевод выполнен!');
+                // очистка полей
+                if (toAcc.isDebt && !fromAcc.isDebt) {
+                    document.getElementById('transferPrincipal').value = '';
+                    document.getElementById('transferInterest').value = '';
+                } else {
+                    document.getElementById('transferAmount').value = '';
+                }
             };
 
             function showBudgetModal(budgetId = null) {
@@ -1745,23 +1831,35 @@
                 const range = getStatsRange();
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
                 const txs = getTransactionsInRange(range.start, range.end, accountId, range.inclusiveEnd);
-                const totalExpense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-                const totalIncome = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
                 
-                const expenseByCat = {}, incomeByCat = {};
-                txs.forEach(tx => { const cat = getCategory(tx.categoryId); const name = cat?.name || 'Без категории'; if (tx.type === 'expense') expenseByCat[name] = (expenseByCat[name] || 0) + tx.amount; else incomeByCat[name] = (incomeByCat[name] || 0) + tx.amount; });
+                const expenseList = [], incomeList = [];
+                txs.forEach(tx => {
+                    const cat = getCategory(tx.categoryId);
+                    const name = cat?.name || 'Без категории';
+                    const catId = tx.categoryId || null;
+                    if (tx.type === 'expense') {
+                        const existing = expenseList.find(e => e.id === catId);
+                        if (existing) existing.sum += tx.amount;
+                        else expenseList.push({ id: catId, name, sum: tx.amount });
+                    } else {
+                        const existing = incomeList.find(e => e.id === catId);
+                        if (existing) existing.sum += tx.amount;
+                        else incomeList.push({ id: catId, name, sum: tx.amount });
+                    }
+                });
+                expenseList.sort((a,b) => b.sum - a.sum);
+                incomeList.sort((a,b) => b.sum - a.sum);
+                const totalExpense = expenseList.reduce((s, e) => s + e.sum, 0);
+                const totalIncome = incomeList.reduce((s, e) => s + e.sum, 0);
 
-                const sortByValue = (obj) => Object.entries(obj).sort(([,a], [,b]) => b - a);
-                const sortedExpense = sortByValue(expenseByCat);
-                const sortedIncome = sortByValue(incomeByCat);
-
-                const renderCatList = (entries, total, type) => {
-                    if (entries.length === 0) return '<div class="empty-state">Нет данных</div>';
-                    return entries.map(([name, sum]) => {
+                const renderCatList = (items, total, type) => {
+                    if (items.length === 0) return '<div class="empty-state">Нет данных</div>';
+                    return items.map(({id, name, sum}) => {
                         const pct = total > 0 ? Math.round((sum / total) * 100) : 0;
-                        const icon = appData.categories.find(c => c.name === name && c.type === type)?.icon || (type === 'expense' ? '💸' : '💰');
+                        const icon = id ? getCategory(id)?.icon : '📌';
+                        const catId = id || '';
                         return `
-                        <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border);">
+                        <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); cursor:pointer;" onclick="showCategoryTransactionsModal('${catId}', '${type}')">
                             <span>${icon} ${name}</span>
                             <span style="font-weight:600;">${formatCurrency(sum, 'RUB', true)} <span style="color:var(--text2); font-size:0.8rem;">${pct}%</span></span>
                         </div>`;
@@ -1770,14 +1868,13 @@
 
                 document.getElementById('expenseDetail').innerHTML = `
                     <div style="font-weight:600; margin-bottom:8px;">Всего расходов: ${formatCurrency(totalExpense, 'RUB', true)}</div>
-                    ${renderCatList(sortedExpense, totalExpense, 'expense')}
+                    ${renderCatList(expenseList, totalExpense, 'expense')}
                 `;
                 document.getElementById('incomeDetail').innerHTML = `
                     <div style="font-weight:600; margin-bottom:8px;">Всего доходов: ${formatCurrency(totalIncome, 'RUB', true)}</div>
-                    ${renderCatList(sortedIncome, totalIncome, 'income')}
+                    ${renderCatList(incomeList, totalIncome, 'income')}
                 `;
 
-                // Активы и долги
                 const assetsAccounts = appData.accounts.filter(a => !a.isDebt && !a.archived);
                 const sortedAssets = assetsAccounts.sort((a,b) => convertCurrency(b.balance, b.currency, 'RUB') - convertCurrency(a.balance, a.currency, 'RUB'));
                 const debtsAccounts = appData.accounts.filter(a => a.isDebt && !a.archived);
@@ -1795,14 +1892,13 @@
                         <span style="font-weight:600;">${formatCurrency(convertCurrency(a.balance, a.currency, 'RUB'), 'RUB', true)}</span>
                     </div>`).join('') : '<div class="empty-state">Нет долгов</div>';
 
-                const expenseLabels = sortedExpense.map(([name, sum]) => { const pct = totalExpense > 0 ? Math.round((sum / totalExpense) * 100) : 0; return `${name} (${pct}%)`; });
-                const expenseValues = sortedExpense.map(([, sum]) => sum);
-                const incomeLabels = sortedIncome.map(([name, sum]) => { const pct = totalIncome > 0 ? Math.round((sum / totalIncome) * 100) : 0; return `${name} (${pct}%)`; });
-                const incomeValues = sortedIncome.map(([, sum]) => sum);
+                const expenseLabels = expenseList.map(e => { const pct = totalExpense > 0 ? Math.round((e.sum / totalExpense) * 100) : 0; return `${e.name} (${pct}%)`; });
+                const expenseValues = expenseList.map(e => e.sum);
+                const incomeLabels = incomeList.map(e => { const pct = totalIncome > 0 ? Math.round((e.sum / totalIncome) * 100) : 0; return `${e.name} (${pct}%)`; });
+                const incomeValues = incomeList.map(e => e.sum);
 
                 const colors = ['#e17055', '#d63031', '#fdcb6e', '#636e72', '#0984e3', '#a29bfe', '#e84393', '#00b894', '#6c5ce7', '#fd79a8', '#fab1a0', '#81ecec'];
                 const surfaceColor = getComputedStyle(document.body).getPropertyValue('--surface').trim() || '#fff';
-                const textColor = getComputedStyle(document.body).getPropertyValue('--text').trim();
                 const noLegend = { display: false };
 
                 if (expenseValues.length) { charts.expenseChart = new Chart(document.getElementById('expenseChart'), { type: 'doughnut', data: { labels: expenseLabels, datasets: [{ data: expenseValues, backgroundColor: colors.slice(0, expenseValues.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
@@ -1810,6 +1906,33 @@
                 if (sortedAssets.length) { charts.assetsChart = new Chart(document.getElementById('assetsChart'), { type: 'doughnut', data: { labels: sortedAssets.map(a => a.name), datasets: [{ data: sortedAssets.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: sortedAssets.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
                 if (sortedDebts.length) { charts.debtsChart = new Chart(document.getElementById('debtsChart'), { type: 'doughnut', data: { labels: sortedDebts.map(a => a.name), datasets: [{ data: sortedDebts.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: sortedDebts.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
             }
+
+            // Новая функция: показать транзакции по категории
+            window.showCategoryTransactionsModal = function(catId, type) {
+                const range = getStatsRange();
+                const txs = appData.transactions.filter(tx => {
+                    if (tx.type !== type) return false;
+                    if (tx.date < range.start) return false;
+                    if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return false;
+                    if (catId) {
+                        return tx.categoryId === catId;
+                    } else {
+                        return !tx.categoryId; // без категории
+                    }
+                });
+                txs.sort((a,b) => b.date.localeCompare(a.date));
+                const catName = catId ? getCategory(catId)?.name : 'Без категории';
+                const total = txs.reduce((s, t) => s + t.amount, 0);
+                const html = `
+                    <h2>${catName} (${type==='income'?'Доходы':'Расходы'})</h2>
+                    <div style="margin-bottom:12px; font-weight:600;">Всего: ${formatCurrency(total, 'RUB', true)}</div>
+                    <div style="max-height:60vh; overflow-y:auto;">
+                        ${txs.length ? txs.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state">Нет транзакций</div>'}
+                    </div>
+                    <button class="btn btn-outline btn-sm" onclick="closeModal()" style="margin-top:12px;">Закрыть</button>
+                `;
+                showModal(html);
+            };
 
             function renderMonthlyCharts() {
                 destroyCharts(['balanceMonthlyChart', 'incomeMonthlyChart', 'expenseMonthlyChart']);
@@ -1913,11 +2036,17 @@
                     const toName = toAcc ? toAcc.name : '?';
                     const fromCur = fromAcc?.currency || 'RUB';
                     const toCur = toAcc?.currency || 'RUB';
-                    const amountStr = formatAmountHidden(tx.amount, fromCur);
-                    let extra = '';
-                    if (fromCur !== toCur) {
-                        const conv = tx.convertedAmount || convertCurrency(tx.amount, fromCur, toCur);
-                        extra = ` (→ ${formatAmountHidden(conv, toCur)})`;
+                    let desc = '';
+                    if (tx.principal !== undefined && toAcc && toAcc.isDebt) {
+                        desc = `Тело долга: ${formatAmountHidden(tx.principal, fromCur)}`;
+                        if (tx.interest) desc += `, Проценты: ${formatAmountHidden(tx.interest, fromCur)}`;
+                        desc += ` (→ ${formatAmountHidden(tx.convertedAmount || convertCurrency(tx.principal, fromCur, toCur), toCur)})`;
+                    } else {
+                        desc = formatAmountHidden(tx.amount, fromCur);
+                        if (fromCur !== toCur) {
+                            const conv = tx.convertedAmount || convertCurrency(tx.amount, fromCur, toCur);
+                            desc += ` (→ ${formatAmountHidden(conv, toCur)})`;
+                        }
                     }
                     return `
                     <div class="transaction-item" onclick="showTransactionModal('${tx.id}')">
@@ -1926,7 +2055,7 @@
                         <div class="tx-category">Перевод</div>
                         <div class="tx-meta">${tx.date} · ${fromName} → ${toName} ${tx.note ? '· '+tx.note : ''}</div>
                       </div>
-                      <div class="tx-amount" style="color: var(--text2);">${amountStr}${extra}</div>
+                      <div class="tx-amount" style="color: var(--text2);">${desc}</div>
                     </div>`;
                 }
                 if (tx.type === 'revaluation') {
@@ -2070,6 +2199,7 @@
             window.saveEditCategory = saveEditCategory;
             window.toggleHideAmounts = toggleHideAmounts;
             window.toggleArchiveView = toggleArchiveView;
+            window.showCategoryTransactionsModal = showCategoryTransactionsModal;
 
             init();
         })();
