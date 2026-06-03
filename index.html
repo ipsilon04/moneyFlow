@@ -697,8 +697,9 @@
                     </div>
                     <div id="transferDebtBlock" style="display:none;">
                         <div class="form-row">
-                            <div class="form-group"><label>Тело долга</label><input type="number" id="transferPrincipal" placeholder="0" step="0.01" min="0"></div>
-                            <div class="form-group"><label>Проценты</label><input type="number" id="transferInterest" placeholder="0" step="0.01" min="0"></div>
+                            <div class="form-group"><label>Тело долга</label><input type="number" id="transferPrincipal" placeholder="0" step="0.01" min="0" oninput="recalcDebtFields('principal')"></div>
+                            <div class="form-group"><label>Проценты</label><input type="number" id="transferInterest" placeholder="0" step="0.01" min="0" oninput="recalcDebtFields('interest')"></div>
+                            <div class="form-group"><label>Всего</label><input type="number" id="transferTotal" placeholder="0" step="0.01" min="0" oninput="recalcDebtFields('total')"></div>
                         </div>
                     </div>
                     <div class="form-group"><label>Дата</label><input type="date" id="transferDate"></div>
@@ -907,7 +908,12 @@
             async function loadData() {
                 const localRaw = localStorage.getItem(STORAGE_KEY);
                 if (localRaw) {
-                    return JSON.parse(localRaw);
+                    const data = JSON.parse(localRaw);
+                    // дооснащаем старые счета типом долга
+                    data.accounts.forEach(a => {
+                        if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only';
+                    });
+                    return data;
                 }
                 return getDefaultData();
             }
@@ -937,6 +943,7 @@
                         { id: 'c11', name: 'Одежда', type: 'expense', icon: '👕', color: '#a29bfe' },
                         { id: 'c12', name: 'Связь', type: 'expense', icon: '📱', color: '#636e72' },
                         { id: 'c13', name: 'Изменение цены', type: 'revaluation', icon: '💱', color: '#a29bfe' },
+                        { id: 'c14', name: 'Кредит', type: 'expense', icon: '🏦', color: '#e17055' },
                     ],
                     transactions: [],
                     budgets: [],
@@ -1041,6 +1048,25 @@
                 });
             }
 
+            function getDebtExpensesInRange(start, end, accountId, inclusiveEnd) {
+                return appData.transactions.filter(tx => {
+                    if (tx.type !== 'transfer') return false;
+                    const toAcc = getAccount(tx.transferTo);
+                    if (!toAcc || !toAcc.isDebt) return false;
+                    const fromAcc = getAccount(tx.transferFrom);
+                    if (!fromAcc || fromAcc.isDebt) return false;
+                    if (tx.date < start) return false;
+                    if (inclusiveEnd ? tx.date > end : tx.date >= end) return false;
+                    if (accountId !== 'all' && tx.accountId !== accountId) return false;
+                    const expense = toAcc.debtType === 'full_payment' ? (tx.amount || 0) : (tx.interest || 0);
+                    return expense > 0;
+                }).map(tx => {
+                    const toAcc = getAccount(tx.transferTo);
+                    const expense = toAcc.debtType === 'full_payment' ? (tx.amount || 0) : (tx.interest || 0);
+                    return { amount: expense, date: tx.date, accountId: tx.accountId };
+                });
+            }
+
             function switchTab(tab) {
                 currentTab = tab;
                 document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -1107,8 +1133,15 @@
                 <div class="form-group"><label>Иконка</label><input id="accIcon" value="${acc?.icon||'💵'}" maxlength="2"></div>
                 <div class="form-group"><label>Начальный баланс</label><input type="number" id="accBalance" value="${acc?.balance||0}" step="0.01"></div>
                 <div class="checkbox-group">
-                  <input type="checkbox" id="accIsDebt" ${acc?.isDebt?'checked':''}>
+                  <input type="checkbox" id="accIsDebt" ${acc?.isDebt?'checked':''} onchange="document.getElementById('debtTypeGroup').style.display = this.checked ? 'block' : 'none'">
                   <label for="accIsDebt">Это долг / кредит</label>
+                </div>
+                <div class="form-group" id="debtTypeGroup" style="display:${acc?.isDebt?'block':'none'};">
+                  <label>Тип учёта расходов</label>
+                  <select id="accDebtType">
+                    <option value="interest_only" ${acc?.debtType==='interest_only'?'selected':''}>Только проценты</option>
+                    <option value="full_payment" ${acc?.debtType==='full_payment'?'selected':''}>Весь платёж</option>
+                  </select>
                 </div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap;">
                   ${acc ? '<button class="btn btn-danger btn-sm" onclick="deleteAccount(\''+acc.id+'\')">🗑 Удалить</button>' : ''}
@@ -1147,12 +1180,13 @@
                 const icon = document.getElementById('accIcon').value || '💵';
                 const balance = parseFloat(document.getElementById('accBalance').value) || 0;
                 const isDebt = document.getElementById('accIsDebt').checked;
+                const debtType = document.getElementById('accDebtType')?.value || 'interest_only';
                 if (!name) return alert('Введите название счёта');
                 if (editingId) {
                     const acc = getAccount(editingId);
-                    if (acc) { acc.name = name; acc.currency = currency; acc.color = color; acc.icon = icon; acc.balance = balance; acc.isDebt = isDebt; }
+                    if (acc) { acc.name = name; acc.currency = currency; acc.color = color; acc.icon = icon; acc.balance = balance; acc.isDebt = isDebt; acc.debtType = isDebt ? debtType : undefined; }
                 } else {
-                    appData.accounts.push({ id: genId(), name, currency, balance, color, icon, isDebt, archived: false });
+                    appData.accounts.push({ id: genId(), name, currency, balance, color, icon, isDebt, archived: false, debtType: isDebt ? debtType : undefined });
                 }
                 save();
                 closeModal();
@@ -1192,8 +1226,9 @@
                 if (toAcc && toAcc.isDebt && fromAcc && !fromAcc.isDebt) {
                     amountBlockHtml = `
                         <div class="form-row">
-                            <div class="form-group"><label>Тело долга</label><input type="number" id="transferPrincipalEdit" value="${tx.principal||0}" step="0.01" min="0"></div>
-                            <div class="form-group"><label>Проценты</label><input type="number" id="transferInterestEdit" value="${tx.interest||0}" step="0.01" min="0"></div>
+                            <div class="form-group"><label>Тело долга</label><input type="number" id="transferPrincipalEdit" value="${tx.principal||0}" step="0.01" min="0" oninput="recalcDebtFieldsEdit('principal')"></div>
+                            <div class="form-group"><label>Проценты</label><input type="number" id="transferInterestEdit" value="${tx.interest||0}" step="0.01" min="0" oninput="recalcDebtFieldsEdit('interest')"></div>
+                            <div class="form-group"><label>Всего</label><input type="number" id="transferTotalEdit" value="${tx.amount||0}" step="0.01" min="0" oninput="recalcDebtFieldsEdit('total')"></div>
                         </div>`;
                 } else {
                     amountBlockHtml = `
@@ -1242,7 +1277,11 @@
                 if (toAcc.isDebt && !fromAcc.isDebt) {
                     principal = parseFloat(document.getElementById('transferPrincipalEdit').value) || 0;
                     interest = parseFloat(document.getElementById('transferInterestEdit').value) || 0;
-                    if (principal === 0 && interest === 0) return alert('Введите тело долга или проценты');
+                    const total = parseFloat(document.getElementById('transferTotalEdit').value) || 0;
+                    // Приоритет: если все три заданы, берём из полей, но проверяем корректность
+                    if (principal + interest !== total && principal && interest && total) {
+                        return alert('Сумма тела и процентов не совпадает с полем "Всего"');
+                    }
                     amount = principal + interest;
                     convertedAmount = convertCurrency(principal, fromAcc.currency, toAcc.currency);
                 } else {
@@ -1288,7 +1327,6 @@
                 const toIsDebt = toAcc.isDebt;
                 
                 if (toIsDebt && !fromIsDebt) {
-                    // перевод на долг: principal + interest уходят с отправителя, principal конвертируется в погашение долга
                     const convertedPrincipal = tx.convertedAmount || convertCurrency(principal ?? amount, fromCur, toCur);
                     if (reverse) {
                         fromAcc.balance += (principal ?? amount) + interest;
@@ -1298,7 +1336,6 @@
                         toAcc.balance -= convertedPrincipal;
                     }
                 } else if (fromIsDebt && !toIsDebt) {
-                    // перевод с долга: обратная ситуация не рассматривается, но оставим как было
                     const convertedAmount = tx.convertedAmount || convertCurrency(amount, fromCur, toCur);
                     if (reverse) {
                         fromAcc.balance -= amount;
@@ -1317,7 +1354,6 @@
                         toAcc.balance -= convertedAmount;
                     }
                 } else {
-                    // обычный перевод между активами
                     const convertedAmount = tx.convertedAmount || convertCurrency(amount, fromCur, toCur);
                     if (reverse) {
                         fromAcc.balance += amount;
@@ -1492,6 +1528,52 @@
 
             window.updateTransferForm = updateTransferForm;
 
+            window.recalcDebtFields = function(changed) {
+                const principalEl = document.getElementById('transferPrincipal');
+                const interestEl = document.getElementById('transferInterest');
+                const totalEl = document.getElementById('transferTotal');
+                if (!principalEl || !interestEl || !totalEl) return;
+                const p = parseFloat(principalEl.value) || 0;
+                const i = parseFloat(interestEl.value) || 0;
+                const t = parseFloat(totalEl.value) || 0;
+                if (changed === 'principal') {
+                    if (i > 0 && t > 0) { /* ничего не делаем */ }
+                    else if (i > 0) totalEl.value = (p + i).toFixed(2);
+                    else if (t > 0) interestEl.value = Math.max(0, t - p).toFixed(2);
+                } else if (changed === 'interest') {
+                    if (p > 0 && t > 0) { }
+                    else if (p > 0) totalEl.value = (p + i).toFixed(2);
+                    else if (t > 0) principalEl.value = Math.max(0, t - i).toFixed(2);
+                } else if (changed === 'total') {
+                    if (p > 0 && i > 0) { }
+                    else if (p > 0) interestEl.value = Math.max(0, t - p).toFixed(2);
+                    else if (i > 0) principalEl.value = Math.max(0, t - i).toFixed(2);
+                }
+            };
+
+            window.recalcDebtFieldsEdit = function(changed) {
+                const principalEl = document.getElementById('transferPrincipalEdit');
+                const interestEl = document.getElementById('transferInterestEdit');
+                const totalEl = document.getElementById('transferTotalEdit');
+                if (!principalEl || !interestEl || !totalEl) return;
+                const p = parseFloat(principalEl.value) || 0;
+                const i = parseFloat(interestEl.value) || 0;
+                const t = parseFloat(totalEl.value) || 0;
+                if (changed === 'principal') {
+                    if (i > 0 && t > 0) { }
+                    else if (i > 0) totalEl.value = (p + i).toFixed(2);
+                    else if (t > 0) interestEl.value = Math.max(0, t - p).toFixed(2);
+                } else if (changed === 'interest') {
+                    if (p > 0 && t > 0) { }
+                    else if (p > 0) totalEl.value = (p + i).toFixed(2);
+                    else if (t > 0) principalEl.value = Math.max(0, t - i).toFixed(2);
+                } else if (changed === 'total') {
+                    if (p > 0 && i > 0) { }
+                    else if (p > 0) interestEl.value = Math.max(0, t - p).toFixed(2);
+                    else if (i > 0) principalEl.value = Math.max(0, t - i).toFixed(2);
+                }
+            };
+
             window.makeTransfer = function() {
                 const fromId = document.getElementById('transferFrom').value;
                 const toId = document.getElementById('transferTo').value;
@@ -1504,9 +1586,12 @@
                 if (toAcc.isDebt && !fromAcc.isDebt) {
                     principal = parseFloat(document.getElementById('transferPrincipal').value) || 0;
                     interest = parseFloat(document.getElementById('transferInterest').value) || 0;
-                    if (principal < 0 || interest < 0) return alert('Суммы не могут быть отрицательными');
-                    if (principal === 0 && interest === 0) return alert('Введите тело долга или проценты');
+                    const total = parseFloat(document.getElementById('transferTotal').value) || 0;
+                    if (principal + interest !== total && principal && interest && total) {
+                        return alert('Сумма тела и процентов не совпадает с полем "Всего"');
+                    }
                     amount = principal + interest;
+                    if (amount <= 0) return alert('Введите сумму');
                     convertedAmount = convertCurrency(principal, fromAcc.currency, toAcc.currency);
                 } else {
                     amount = parseFloat(document.getElementById('transferAmount').value);
@@ -1537,10 +1622,10 @@
                 save();
                 renderAll();
                 alert('Перевод выполнен!');
-                // очистка полей
                 if (toAcc.isDebt && !fromAcc.isDebt) {
                     document.getElementById('transferPrincipal').value = '';
                     document.getElementById('transferInterest').value = '';
+                    document.getElementById('transferTotal').value = '';
                 } else {
                     document.getElementById('transferAmount').value = '';
                 }
@@ -1673,7 +1758,7 @@
                     if (line.startsWith('[')) { section = line.replace(/[\[\]]/g, '').toLowerCase(); continue; }
                     const cols = line.split(';');
                     if (cols.length === 0) continue;
-                    if (section === 'счета') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() === 'счёт') { const name = cols[1]?.trim(), currency = cols[2]?.trim() || 'RUB', color = cols[3]?.trim() || '#6c5ce7', icon = cols[4]?.trim() || '💳', isDebt = cols[5]?.trim().toLowerCase() === 'true', archived = cols[6]?.trim().toLowerCase() === 'true'; if (name && !appData.accounts.find(a => a.name === name)) { appData.accounts.push({ id: genId(), name, currency, balance: 0, color, icon, isDebt, archived: archived || false }); importedAccounts++; } } }
+                    if (section === 'счета') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() === 'счёт') { const name = cols[1]?.trim(), currency = cols[2]?.trim() || 'RUB', color = cols[3]?.trim() || '#6c5ce7', icon = cols[4]?.trim() || '💳', isDebt = cols[5]?.trim().toLowerCase() === 'true', archived = cols[6]?.trim().toLowerCase() === 'true'; if (name && !appData.accounts.find(a => a.name === name)) { appData.accounts.push({ id: genId(), name, currency, balance: 0, color, icon, isDebt, archived: archived || false, debtType: isDebt ? 'interest_only' : undefined }); importedAccounts++; } } }
                     else if (section === 'категории') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() === 'категория') { const name = cols[1]?.trim(), type = cols[2]?.trim() || 'expense', icon = cols[3]?.trim() || '📌', color = cols[4]?.trim() || '#6c5ce7'; if (name && !appData.categories.find(c => c.name === name && c.type === type)) { appData.categories.push({ id: genId(), name, type, icon, color }); importedCategories++; } } }
                     else if (section === 'транзакции') { if (cols[0]?.trim().toLowerCase() === 'дата') continue; const date = cols[0]?.trim(); if (!date || cols.length < 3) continue; const typeStr = cols[1]?.trim().toLowerCase(); if (typeStr === 'перевод') continue; const amount = parseFloat(cols[2]?.replace(',', '.')); if (isNaN(amount)) continue; let type, categoryType; if (typeStr.includes('доход')) { type = 'income'; categoryType = 'income'; } else if (typeStr.includes('расход')) { type = 'expense'; categoryType = 'expense'; } else if (typeStr.includes('изменение цены')) { type = 'revaluation'; categoryType = 'revaluation'; } else continue; const accountName = cols[4]?.trim() || 'Основной', categoryName = cols[5]?.trim(), note = cols[6]?.trim() || '', tags = cols[7] ? cols[7].split(' ').filter(Boolean) : []; let account = appData.accounts.find(a => a.name === accountName); if (!account) { account = { id: genId(), name: accountName, currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💳', isDebt: false, archived: false }; appData.accounts.push(account); importedAccounts++; } let category = null; if (categoryName) { category = appData.categories.find(c => c.name === categoryName && c.type === categoryType); if (!category) { category = { id: genId(), name: categoryName, type: categoryType, icon: '📌', color: '#6c5ce7' }; appData.categories.push(category); importedCategories++; } } const tx = { id: genId(), type, amount, accountId: account.id, categoryId: category ? category.id : null, date, note, tags, isRecurring: false, recurringPeriod: null }; appData.transactions.push(tx); if (type === 'revaluation') { account.balance += amount; } else { updateAccountBalance(tx, false); } importedTransactions++; }
                     else if (section === 'балансы счетов') { if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название') continue; if (cols[0]?.trim().toLowerCase() === 'баланс') { const name = cols[1]?.trim(), amount = parseFloat(cols[2]?.replace(',', '.')), currency = cols[3]?.trim() || 'RUB'; if (name && !isNaN(amount)) importedBalances.push({ name, amount, currency }); } }
@@ -1831,6 +1916,7 @@
                 const range = getStatsRange();
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
                 const txs = getTransactionsInRange(range.start, range.end, accountId, range.inclusiveEnd);
+                const debtExpenses = getDebtExpensesInRange(range.start, range.end, accountId, range.inclusiveEnd);
                 
                 const expenseList = [], incomeList = [];
                 txs.forEach(tx => {
@@ -1847,6 +1933,13 @@
                         else incomeList.push({ id: catId, name, sum: tx.amount });
                     }
                 });
+                // Добавляем расходы по кредитам
+                if (debtExpenses.length) {
+                    const debtSum = debtExpenses.reduce((s, d) => s + d.amount, 0);
+                    const existing = expenseList.find(e => e.id === 'c14');
+                    if (existing) existing.sum += debtSum;
+                    else expenseList.push({ id: 'c14', name: 'Кредит', sum: debtSum });
+                }
                 expenseList.sort((a,b) => b.sum - a.sum);
                 incomeList.sort((a,b) => b.sum - a.sum);
                 const totalExpense = expenseList.reduce((s, e) => s + e.sum, 0);
@@ -1907,9 +2000,37 @@
                 if (sortedDebts.length) { charts.debtsChart = new Chart(document.getElementById('debtsChart'), { type: 'doughnut', data: { labels: sortedDebts.map(a => a.name), datasets: [{ data: sortedDebts.map(a => convertCurrency(a.balance, a.currency, 'RUB')), backgroundColor: sortedDebts.map(a => a.color), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
             }
 
-            // Новая функция: показать транзакции по категории
             window.showCategoryTransactionsModal = function(catId, type) {
                 const range = getStatsRange();
+                if (catId === 'c14') {
+                    // специальная обработка для кредитов
+                    const debtTxs = getDebtExpensesInRange(range.start, range.end, 'all', range.inclusiveEnd);
+                    // нужно показать переводы, породившие эти расходы
+                    const transferIds = new Set();
+                    appData.transactions.forEach(tx => {
+                        if (tx.type !== 'transfer') return;
+                        const toAcc = getAccount(tx.transferTo);
+                        if (!toAcc || !toAcc.isDebt) return;
+                        if (tx.date < range.start) return;
+                        if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return;
+                        transferIds.add(tx.id);
+                    });
+                    const transfers = appData.transactions.filter(tx => transferIds.has(tx.id)).sort((a,b) => b.date.localeCompare(a.date));
+                    const total = transfers.reduce((s, tx) => {
+                        const toAcc = getAccount(tx.transferTo);
+                        return s + (toAcc.debtType === 'full_payment' ? tx.amount : (tx.interest || 0));
+                    }, 0);
+                    const html = `
+                        <h2>Кредит (Расходы)</h2>
+                        <div style="margin-bottom:12px; font-weight:600;">Всего: ${formatCurrency(total, 'RUB', true)}</div>
+                        <div style="max-height:60vh; overflow-y:auto;">
+                            ${transfers.length ? transfers.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state">Нет транзакций</div>'}
+                        </div>
+                        <button class="btn btn-outline btn-sm" onclick="closeModal()" style="margin-top:12px;">Закрыть</button>
+                    `;
+                    showModal(html);
+                    return;
+                }
                 const txs = appData.transactions.filter(tx => {
                     if (tx.type !== type) return false;
                     if (tx.date < range.start) return false;
@@ -1917,7 +2038,7 @@
                     if (catId) {
                         return tx.categoryId === catId;
                     } else {
-                        return !tx.categoryId; // без категории
+                        return !tx.categoryId;
                     }
                 });
                 txs.sort((a,b) => b.date.localeCompare(a.date));
@@ -1947,8 +2068,12 @@
                 const endDate = new Date(range.end);
                 let cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
                 while (cur <= endDate) { const y = cur.getFullYear(); const m = cur.getMonth(); const firstDay = new Date(y, m, 1); const lastDay = new Date(y, m + 1, 0); months.push({ label: firstDay.toLocaleString('ru', { month: 'short', year: '2-digit' }), start: formatLocalDate(firstDay), end: formatLocalDate(lastDay) }); cur.setMonth(cur.getMonth() + 1); }
-                const incomeData = months.map(m => { return getTransactionsInRange(m.start, m.end, accountId, true).filter(tx => tx.type === 'income').reduce((s, t) => s + t.amount, 0); });
-                const expenseData = months.map(m => { return getTransactionsInRange(m.start, m.end, accountId, true).filter(tx => tx.type === 'expense').reduce((s, t) => s + t.amount, 0); });
+                const incomeData = months.map(m => getTransactionsInRange(m.start, m.end, accountId, true).filter(tx => tx.type === 'income').reduce((s, t) => s + t.amount, 0));
+                const expenseData = months.map(m => {
+                    const regular = getTransactionsInRange(m.start, m.end, accountId, true).filter(tx => tx.type === 'expense').reduce((s, t) => s + t.amount, 0);
+                    const debt = getDebtExpensesInRange(m.start, m.end, accountId, true).reduce((s, d) => s + d.amount, 0);
+                    return regular + debt;
+                });
                 const monthLabels = months.map(m => m.label);
                 if (balanceLabels.length) { charts.balanceMonthlyChart = new Chart(document.getElementById('balanceMonthlyChart'), { type: 'line', data: { labels: balanceLabels, datasets: [{ label: 'Общий баланс', data: balanceData, borderColor: '#6c5ce7', backgroundColor: 'rgba(108,92,231,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
                 if (monthLabels.length) { charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), { type: 'line', data: { labels: monthLabels, datasets: [{ label: 'Доходы', data: incomeData, borderColor: '#00b894', backgroundColor: 'rgba(0,184,148,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
@@ -1983,8 +2108,10 @@
             function renderDashboard() {
                 const month = getMonthRange();
                 const txMonth = getTransactionsInRange(month.start, month.end, 'all', month.inclusiveEnd);
+                const debtMonth = getDebtExpensesInRange(month.start, month.end, 'all', month.inclusiveEnd);
                 const income = txMonth.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-                const expense = txMonth.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+                let expense = txMonth.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+                expense += debtMonth.reduce((s, d) => s + d.amount, 0);
                 const totalAssetsRub = appData.accounts.filter(a => !a.isDebt).reduce((s, a) => s + convertCurrency(a.balance, a.currency, 'RUB'), 0);
                 const totalDebtsRub = appData.accounts.filter(a => a.isDebt).reduce((s, a) => s + convertCurrency(a.balance, a.currency, 'RUB'), 0);
                 const netWorthRub = totalAssetsRub - totalDebtsRub;
@@ -2038,8 +2165,8 @@
                     const toCur = toAcc?.currency || 'RUB';
                     let desc = '';
                     if (tx.principal !== undefined && toAcc && toAcc.isDebt) {
-                        desc = `Тело долга: ${formatAmountHidden(tx.principal, fromCur)}`;
-                        if (tx.interest) desc += `, Проценты: ${formatAmountHidden(tx.interest, fromCur)}`;
+                        desc = `Тело: ${formatAmountHidden(tx.principal, fromCur)}`;
+                        if (tx.interest) desc += `, %: ${formatAmountHidden(tx.interest, fromCur)}`;
                         desc += ` (→ ${formatAmountHidden(tx.convertedAmount || convertCurrency(tx.principal, fromCur, toCur), toCur)})`;
                     } else {
                         desc = formatAmountHidden(tx.amount, fromCur);
@@ -2129,14 +2256,26 @@
                 const month = getMonthRange();
                 const list = document.getElementById('budgetList');
                 if (!appData.budgets.length) { list.innerHTML = '<div class="empty-state"><div class="icon">🎯</div>Нет бюджетов</div>'; return; }
-                list.innerHTML = appData.budgets.map(b => { const cat = getCategory(b.categoryId); const txs = getTransactionsInRange(month.start, month.end, b.accountId, month.inclusiveEnd).filter(t => t.type === 'expense' && t.categoryId === b.categoryId); const spent = txs.reduce((s, t) => s + t.amount, 0); const pct = Math.min(100, Math.round((spent / b.amount) * 100)); const barColor = pct > 90 ? '#e17055' : pct > 60 ? '#fdcb6e' : '#00b894'; return `
+                list.innerHTML = appData.budgets.map(b => {
+                    const cat = getCategory(b.categoryId);
+                    let spent = getTransactionsInRange(month.start, month.end, b.accountId, month.inclusiveEnd)
+                        .filter(t => t.type === 'expense' && t.categoryId === b.categoryId)
+                        .reduce((s, t) => s + t.amount, 0);
+                    if (b.categoryId === 'c14') {
+                        spent += getDebtExpensesInRange(month.start, month.end, b.accountId, month.inclusiveEnd)
+                            .reduce((s, d) => s + d.amount, 0);
+                    }
+                    const pct = Math.min(100, Math.round((spent / b.amount) * 100));
+                    const barColor = pct > 90 ? '#e17055' : pct > 60 ? '#fdcb6e' : '#00b894';
+                    return `
                     <div class="budget-item" onclick="showBudgetModal('${b.id}')">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                       <span><strong>${cat?.icon||'📌'} ${cat?.name||'?'}</strong> <span style="font-size:0.75rem;color:var(--text2);">${b.period==='monthly'?'мес':'нед'}</span></span>
                       <span style="font-weight:700;">${formatAmountHidden(spent,'RUB')} / ${formatAmountHidden(b.amount,'RUB')}</span>
                     </div>
                     <div class="budget-bar-wrap"><div class="budget-bar-fill" style="width:${pct}%;background:${barColor};"></div></div>
-                    <div style="font-size:0.7rem;color:var(--text2);margin-top:2px;">${pct}% использовано</div></div>`; }).join('');
+                    <div style="font-size:0.7rem;color:var(--text2);margin-top:2px;">${pct}% использовано</div></div>`;
+                }).join('');
             }
 
             const mobileMoreMenu = document.getElementById('mobileMoreMenu');
@@ -2153,7 +2292,7 @@
                 await loadRates();
                 appData = await loadData();
                 if (!appData.monthlyBalances) appData.monthlyBalances = [];
-                appData.accounts.forEach(a => { if (a.archived === undefined) a.archived = false; });
+                appData.accounts.forEach(a => { if (a.archived === undefined) a.archived = false; if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only'; });
                 recalcMonthlyBalances();
                 processRecurring();
                 updateAccountSelects();
@@ -2200,6 +2339,8 @@
             window.toggleHideAmounts = toggleHideAmounts;
             window.toggleArchiveView = toggleArchiveView;
             window.showCategoryTransactionsModal = showCategoryTransactionsModal;
+            window.recalcDebtFields = recalcDebtFields;
+            window.recalcDebtFieldsEdit = recalcDebtFieldsEdit;
 
             init();
         })();
