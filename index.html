@@ -1694,54 +1694,20 @@
             };
 
             function recalcMonthlyBalances() {
-                const allTxs = [...appData.transactions].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-                if (allTxs.length === 0) { appData.monthlyBalances = []; return; }
-                const firstDate = allTxs[0].date;
+                const txs = [...appData.transactions].filter(tx => tx.type !== 'transfer').sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+                if (txs.length === 0) { appData.monthlyBalances = []; return; }
+                const firstDate = txs[0].date;
                 const lastDate = formatLocalDate(new Date());
                 const startDate = new Date(firstDate);
                 const endDate = new Date(lastDate);
                 const startMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
                 const endMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-
-                // Вычисляем начальные балансы (до всех транзакций)
                 const initialBalances = {};
                 for (const acc of appData.accounts) {
-                    let delta = 0;
-                    for (const tx of allTxs) {
-                        if (tx.type === 'transfer') {
-                            if (tx.transferFrom === acc.id) {
-                                const toAcc = getAccount(tx.transferTo);
-                                if (toAcc) {
-                                    if (acc.isDebt) {
-                                        if (!toAcc.isDebt) delta += tx.amount;
-                                        else delta += tx.amount;
-                                    } else {
-                                        if (toAcc.isDebt) delta -= (tx.principal ?? tx.amount) + (tx.interest || 0);
-                                        else delta -= tx.amount;
-                                    }
-                                }
-                            }
-                            if (tx.transferTo === acc.id) {
-                                const fromAcc = getAccount(tx.transferFrom);
-                                if (fromAcc) {
-                                    if (acc.isDebt) {
-                                        if (!fromAcc.isDebt) delta -= tx.convertedAmount || convertCurrency(tx.principal ?? tx.amount, fromAcc.currency, acc.currency);
-                                        else delta -= tx.convertedAmount || convertCurrency(tx.amount, fromAcc.currency, acc.currency);
-                                    } else {
-                                        if (fromAcc.isDebt) delta += tx.convertedAmount || convertCurrency(tx.amount, fromAcc.currency, acc.currency);
-                                        else delta += tx.convertedAmount || convertCurrency(tx.amount, fromAcc.currency, acc.currency);
-                                    }
-                                }
-                            }
-                        } else if (tx.accountId === acc.id) {
-                            if (tx.type === 'income') delta += acc.isDebt ? -tx.amount : tx.amount;
-                            else if (tx.type === 'expense') delta += acc.isDebt ? tx.amount : -tx.amount;
-                            else if (tx.type === 'revaluation') delta += tx.amount;
-                        }
-                    }
-                    initialBalances[acc.id] = acc.balance - delta;
+                    let sumEffect = 0;
+                    for (const tx of txs) { if (tx.accountId !== acc.id) continue; if (tx.type === 'income' || tx.type === 'expense') { let mult = tx.type === 'income' ? 1 : -1; if (acc.isDebt) mult = -mult; sumEffect += mult * tx.amount; } else if (tx.type === 'revaluation') { sumEffect += tx.amount; } }
+                    initialBalances[acc.id] = acc.balance - sumEffect;
                 }
-
                 const monthlyBalances = [];
                 const currentBalances = { ...initialBalances };
                 let txIndex = 0;
@@ -1751,50 +1717,14 @@
                     const month = current.getMonth();
                     const lastDay = new Date(year, month + 1, 0);
                     const lastDayStr = formatLocalDate(lastDay);
-
-                    while (txIndex < allTxs.length && allTxs[txIndex].date <= lastDayStr) {
-                        const tx = allTxs[txIndex];
-                        if (tx.type === 'transfer') {
-                            const fromAcc = getAccount(tx.transferFrom);
-                            const toAcc = getAccount(tx.transferTo);
-                            if (fromAcc && toAcc) {
-                                if (toAcc.isDebt && !fromAcc.isDebt) {
-                                    const principal = tx.principal ?? tx.amount;
-                                    const interest = tx.interest || 0;
-                                    const convertedPrincipal = tx.convertedAmount || convertCurrency(principal, fromAcc.currency, toAcc.currency);
-                                    currentBalances[fromAcc.id] -= principal + interest;
-                                    currentBalances[toAcc.id] -= convertedPrincipal;
-                                } else if (fromAcc.isDebt && !toAcc.isDebt) {
-                                    const conv = tx.convertedAmount || convertCurrency(tx.amount, fromAcc.currency, toAcc.currency);
-                                    currentBalances[fromAcc.id] += tx.amount;
-                                    currentBalances[toAcc.id] += conv;
-                                } else if (fromAcc.isDebt && toAcc.isDebt) {
-                                    const conv = tx.convertedAmount || convertCurrency(tx.amount, fromAcc.currency, toAcc.currency);
-                                    currentBalances[fromAcc.id] += tx.amount;
-                                    currentBalances[toAcc.id] -= conv;
-                                } else {
-                                    const conv = tx.convertedAmount || convertCurrency(tx.amount, fromAcc.currency, toAcc.currency);
-                                    currentBalances[fromAcc.id] -= tx.amount;
-                                    currentBalances[toAcc.id] += conv;
-                                }
-                            }
-                        } else {
-                            const acc = getAccount(tx.accountId);
-                            if (acc) {
-                                if (tx.type === 'income') currentBalances[acc.id] += acc.isDebt ? -tx.amount : tx.amount;
-                                else if (tx.type === 'expense') currentBalances[acc.id] += acc.isDebt ? tx.amount : -tx.amount;
-                                else if (tx.type === 'revaluation') currentBalances[acc.id] += tx.amount;
-                            }
-                        }
+                    while (txIndex < txs.length && txs[txIndex].date <= lastDayStr) {
+                        const tx = txs[txIndex];
+                        const acc = getAccount(tx.accountId);
+                        if (acc) { if (tx.type === 'income' || tx.type === 'expense') { let mult = tx.type === 'income' ? 1 : -1; if (acc.isDebt) mult = -mult; currentBalances[tx.accountId] += mult * tx.amount; } else if (tx.type === 'revaluation') { currentBalances[tx.accountId] += tx.amount; } }
                         txIndex++;
                     }
-
                     let netWorth = 0;
-                    for (const acc of appData.accounts) {
-                        const bal = currentBalances[acc.id] || 0;
-                        const rub = convertCurrency(bal, acc.currency, 'RUB');
-                        netWorth += acc.isDebt ? -rub : rub;
-                    }
+                    for (const acc of appData.accounts) { const bal = currentBalances[acc.id] || 0; const rub = convertCurrency(bal, acc.currency, 'RUB'); if (acc.isDebt) netWorth -= rub; else netWorth += rub; }
                     monthlyBalances.push({ date: lastDayStr, balance: Math.round(netWorth * 100) / 100 });
                     current.setMonth(current.getMonth() + 1);
                 }
@@ -2023,6 +1953,7 @@
                         else incomeList.push({ id: catId, name, sum: tx.amount });
                     }
                 });
+                // Кредитные расходы с учётом категории
                 debtExpenses.forEach(de => {
                     const cat = de.categoryId ? getCategory(de.categoryId) : null;
                     const name = cat ? cat.name : 'Кредит';
@@ -2094,7 +2025,8 @@
             window.showCategoryTransactionsModal = function(catId, type) {
                 const range = getStatsRange();
                 const txs = [];
-                if (catId && getCategory(catId)?.type === 'expense') {
+                if (catId === 'c14' || (catId && getCategory(catId)?.type === 'expense')) {
+                    // показать обычные расходы и переводы с этой категорией
                     const regular = appData.transactions.filter(tx => {
                         if (tx.type !== type) return false;
                         if (tx.date < range.start) return false;
@@ -2102,6 +2034,7 @@
                         return catId ? tx.categoryId === catId : !tx.categoryId;
                     });
                     txs.push(...regular);
+                    // переводы с categoryId === catId
                     const transfers = appData.transactions.filter(tx => {
                         if (tx.type !== 'transfer') return false;
                         const toAcc = getAccount(tx.transferTo);
@@ -2112,6 +2045,7 @@
                     });
                     txs.push(...transfers);
                 } else {
+                    // без категории
                     const regular = appData.transactions.filter(tx => {
                         if (tx.type !== type) return false;
                         if (tx.date < range.start) return false;
@@ -2340,6 +2274,7 @@
                     let spent = getTransactionsInRange(month.start, month.end, b.accountId, month.inclusiveEnd)
                         .filter(t => t.type === 'expense' && t.categoryId === b.categoryId)
                         .reduce((s, t) => s + t.amount, 0);
+                    // добавить кредитные расходы по этой категории
                     spent += getDebtExpensesInRange(month.start, month.end, b.accountId, month.inclusiveEnd)
                         .filter(de => de.categoryId === b.categoryId)
                         .reduce((s, de) => s + de.amount, 0);
