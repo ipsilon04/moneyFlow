@@ -2231,7 +2231,7 @@
                     });
                     txs.push(...regular);
                 }
-                txs.sort((a,b) => b.date.localeCompare(a.date));
+                txs.sort((a,b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 const total = txs.reduce((s, tx) => {
                     if (tx.type === 'transfer') {
                         const toAcc = getAccount(tx.transferTo);
@@ -2321,7 +2321,7 @@
                 document.getElementById('dashExpense').textContent = formatAmountHidden(expense, 'RUB', true);
                 document.getElementById('dashTotalDebts').textContent = formatAmountHidden(totalDebtsRub, 'RUB', true);
                 document.getElementById('dashTotalAssets').textContent = formatAmountHidden(totalAssetsRub, 'RUB', true);
-                const recent = [...appData.transactions].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 8);
+                const recent = [...appData.transactions].sort((a,b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, 8);
                 document.getElementById('recentTransactions').innerHTML = recent.length ? recent.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
                 updateEyeButton();
             }
@@ -2435,7 +2435,7 @@
                 if (dateTo) txs = txs.filter(t => t.date <= dateTo);
                 if (accountId !== 'all') txs = txs.filter(t => t.accountId === accountId || t.transferFrom === accountId || t.transferTo === accountId);
                 if (search) { txs = txs.filter(t => { if (t.type === 'transfer') { const fromAcc = getAccount(t.transferFrom); const toAcc = getAccount(t.transferTo); return (t.note || '').toLowerCase().includes(search) || (fromAcc?.name || '').toLowerCase().includes(search) || (toAcc?.name || '').toLowerCase().includes(search) || String(t.amount).includes(search); } const cat = getCategory(t.categoryId), acc = getAccount(t.accountId); return (cat?.name || '').toLowerCase().includes(search) || (t.note || '').toLowerCase().includes(search) || String(t.amount).includes(search) || (acc?.name || '').toLowerCase().includes(search) || t.tags.some(tag => tag.toLowerCase().includes(search)); }); }
-                txs.sort((a,b) => b.date.localeCompare(a.date));
+                txs.sort((a,b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
                 document.getElementById('transactionList').innerHTML = txs.length ? txs.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
             }
 
