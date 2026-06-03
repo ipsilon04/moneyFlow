@@ -1807,15 +1807,16 @@
                     if (tx.type === 'transfer') {
                         const fromAcc = getAccount(tx.transferFrom);
                         const toAcc = getAccount(tx.transferTo);
-                        csv += `${tx.date};Перевод;${tx.amount};${fromAcc?.currency||''};${fromAcc?.name||''};${toAcc?.name||''};${tx.convertedAmount||''};${tx.principal||''};${tx.interest||''};${tx.categoryId||''};${tx.note};${tx.tags.join(' ')}\n`;
+                        const cat = tx.categoryId ? getCategory(tx.categoryId) : null;
+                        csv += `${tx.date};Перевод;${tx.amount};${fromAcc?.currency||''};${fromAcc?.name||''};${toAcc?.name||''};${tx.convertedAmount||''};${tx.principal||''};${tx.interest||''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`;
                     } else if (tx.type === 'revaluation') {
                         const acc = getAccount(tx.accountId);
                         const cat = getCategory(tx.categoryId);
-                        csv += `${tx.date};Изменение цены;${tx.amount};${acc?.currency||''};${acc?.name||''};;${''};${''};${''};${cat?.id||''};${tx.note};${tx.tags.join(' ')}\n`;
+                        csv += `${tx.date};Изменение цены;${tx.amount};${acc?.currency||''};${acc?.name||''};;${''};${''};${''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`;
                     } else {
                         const acc = getAccount(tx.accountId);
                         const cat = getCategory(tx.categoryId);
-                        csv += `${tx.date};${tx.type==='income'?'Доход':'Расход'};${tx.amount};${acc?.currency||''};${acc?.name||''};;${''};${''};${''};${cat?.id||''};${tx.note};${tx.tags.join(' ')}\n`;
+                        csv += `${tx.date};${tx.type==='income'?'Доход':'Расход'};${tx.amount};${acc?.currency||''};${acc?.name||''};;${''};${''};${''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`;
                     }
                 });
                 csv += '\n[Балансы счетов]\n';
@@ -1882,8 +1883,7 @@
                             const convertedAmount = cols[6] ? parseFloat(cols[6].replace(',', '.')) : undefined;
                             const principal = cols[7] ? parseFloat(cols[7].replace(',', '.')) : undefined;
                             const interest = cols[8] ? parseFloat(cols[8].replace(',', '.')) : undefined;
-                            const categoryIdRaw = cols[9]?.trim();
-                            const categoryId = categoryIdRaw && appData.categories.find(c => c.id === categoryIdRaw) ? categoryIdRaw : null;
+                            const categoryName = cols[9]?.trim();
                             const note = cols[10]?.trim() || '';
                             const tags = cols[11] ? cols[11].split(' ').filter(Boolean) : [];
                             let fromAcc = appData.accounts.find(a => a.name === fromName);
@@ -1897,6 +1897,12 @@
                                 toAcc = { id: genId(), name: toName, currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💳', isDebt: true, archived: false, debtType: 'interest_only' };
                                 appData.accounts.push(toAcc);
                                 importedAccounts++;
+                            }
+                            // поиск категории по имени (расходная)
+                            let categoryId = null;
+                            if (categoryName) {
+                                const cat = appData.categories.find(c => c.name === categoryName && c.type === 'expense');
+                                if (cat) categoryId = cat.id;
                             }
                             const tx = {
                                 id: genId(),
@@ -1927,8 +1933,7 @@
                             else if (typeStr.includes('изменение цены')) { type = 'revaluation'; categoryType = 'revaluation'; }
                             else continue;
                             const accountName = cols[4]?.trim() || 'Основной';
-                            const categoryIdRaw = cols[9]?.trim();
-                            const categoryId = categoryIdRaw && appData.categories.find(c => c.id === categoryIdRaw) ? categoryIdRaw : null;
+                            const categoryName = cols[9]?.trim();
                             const note = cols[10]?.trim() || '';
                             const tags = cols[11] ? cols[11].split(' ').filter(Boolean) : [];
                             let account = appData.accounts.find(a => a.name === accountName);
@@ -1936,6 +1941,11 @@
                                 account = { id: genId(), name: accountName, currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💳', isDebt: false, archived: false };
                                 appData.accounts.push(account);
                                 importedAccounts++;
+                            }
+                            let categoryId = null;
+                            if (categoryName) {
+                                const cat = appData.categories.find(c => c.name === categoryName && c.type === categoryType);
+                                if (cat) categoryId = cat.id;
                             }
                             const tx = { id: genId(), type, amount, accountId: account.id, categoryId: categoryId, date, note, tags, isRecurring: false, recurringPeriod: null };
                             if (type === 'revaluation') { account.balance += amount; }
