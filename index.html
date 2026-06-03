@@ -701,6 +701,10 @@
                             <div class="form-group"><label>Проценты</label><input type="number" id="transferInterest" placeholder="0" step="0.01" min="0" oninput="recalcDebtFields('interest')"></div>
                             <div class="form-group"><label>Всего</label><input type="number" id="transferTotal" placeholder="0" step="0.01" min="0" oninput="recalcDebtFields('total')"></div>
                         </div>
+                        <div class="form-group">
+                            <label>Категория расхода</label>
+                            <select id="transferDebtCategory"></select>
+                        </div>
                     </div>
                     <div class="form-group"><label>Дата</label><input type="date" id="transferDate"></div>
                     <button class="btn btn-primary" onclick="makeTransfer()" style="margin-top:8px;">🔄 Выполнить перевод</button>
@@ -909,7 +913,6 @@
                 const localRaw = localStorage.getItem(STORAGE_KEY);
                 if (localRaw) {
                     const data = JSON.parse(localRaw);
-                    // дооснащаем старые счета типом долга
                     data.accounts.forEach(a => {
                         if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only';
                     });
@@ -1063,7 +1066,7 @@
                 }).map(tx => {
                     const toAcc = getAccount(tx.transferTo);
                     const expense = toAcc.debtType === 'full_payment' ? (tx.amount || 0) : (tx.interest || 0);
-                    return { amount: expense, date: tx.date, accountId: tx.accountId };
+                    return { amount: expense, date: tx.date, accountId: tx.accountId, categoryId: tx.categoryId || null, transferId: tx.id };
                 });
             }
 
@@ -1199,7 +1202,7 @@
                 let optionsHtml = '';
                 filtered.forEach(c => {
                     const selected = (c.id === selectedCategoryId) ? 'selected' : '';
-                    optionsHtml += `<option value="${c.id}" ${selected}>${c.icon} ${c.name} (${c.type==='income'?'доход':c.type==='expense'?'расход':'изм. цены'})</option>`;
+                    optionsHtml += `<option value="${c.id}" ${selected}>${c.icon} ${c.name}</option>`;
                 });
                 return optionsHtml;
             }
@@ -1224,11 +1227,16 @@
                     `<option value="${a.id}" ${tx.transferTo===a.id?'selected':''}>${a.icon} ${a.name} ${a.isDebt?'(долг)':''}</option>`).join('');
                 let amountBlockHtml = '';
                 if (toAcc && toAcc.isDebt && fromAcc && !fromAcc.isDebt) {
+                    const catOptions = buildCategoryOptions('expense', tx.categoryId);
                     amountBlockHtml = `
                         <div class="form-row">
                             <div class="form-group"><label>Тело долга</label><input type="number" id="transferPrincipalEdit" value="${tx.principal||0}" step="0.01" min="0" oninput="recalcDebtFieldsEdit('principal')"></div>
                             <div class="form-group"><label>Проценты</label><input type="number" id="transferInterestEdit" value="${tx.interest||0}" step="0.01" min="0" oninput="recalcDebtFieldsEdit('interest')"></div>
                             <div class="form-group"><label>Всего</label><input type="number" id="transferTotalEdit" value="${tx.amount||0}" step="0.01" min="0" oninput="recalcDebtFieldsEdit('total')"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Категория расхода</label>
+                            <select id="transferDebtCategoryEdit">${catOptions}</select>
                         </div>`;
                 } else {
                     amountBlockHtml = `
@@ -1273,23 +1281,24 @@
                 const oldTx = appData.transactions.find(t => t.id === editingId);
                 if (oldTx) applyTransfer(oldTx, true);
                 
-                let amount, principal, interest, convertedAmount;
+                let amount, principal, interest, convertedAmount, categoryId;
                 if (toAcc.isDebt && !fromAcc.isDebt) {
                     principal = parseFloat(document.getElementById('transferPrincipalEdit').value) || 0;
                     interest = parseFloat(document.getElementById('transferInterestEdit').value) || 0;
                     const total = parseFloat(document.getElementById('transferTotalEdit').value) || 0;
-                    // Приоритет: если все три заданы, берём из полей, но проверяем корректность
                     if (principal + interest !== total && principal && interest && total) {
                         return alert('Сумма тела и процентов не совпадает с полем "Всего"');
                     }
                     amount = principal + interest;
                     convertedAmount = convertCurrency(principal, fromAcc.currency, toAcc.currency);
+                    categoryId = document.getElementById('transferDebtCategoryEdit').value || 'c14';
                 } else {
                     amount = parseFloat(document.getElementById('transferAmountEdit').value);
                     if (!amount || amount <= 0) return alert('Введите сумму');
                     convertedAmount = convertCurrency(amount, fromAcc.currency, toAcc.currency);
                     principal = undefined;
                     interest = undefined;
+                    categoryId = undefined;
                 }
                 
                 const newTx = {
@@ -1300,6 +1309,7 @@
                     convertedAmount: convertedAmount,
                     principal: principal,
                     interest: interest,
+                    categoryId: categoryId,
                     date: date,
                     note: note || `Перевод: ${fromAcc.name} → ${toAcc.name}`,
                     tags: ['перевод'],
@@ -1522,8 +1532,15 @@
                 const toAcc = toId ? getAccount(toId) : null;
                 const amountBlock = document.getElementById('transferAmountBlock');
                 const debtBlock = document.getElementById('transferDebtBlock');
-                if (toAcc && toAcc.isDebt && fromAcc && !fromAcc.isDebt) { amountBlock.style.display = 'none'; debtBlock.style.display = 'block'; }
-                else { amountBlock.style.display = 'block'; debtBlock.style.display = 'none'; }
+                if (toAcc && toAcc.isDebt && fromAcc && !fromAcc.isDebt) {
+                    amountBlock.style.display = 'none';
+                    debtBlock.style.display = 'block';
+                    const catSelect = document.getElementById('transferDebtCategory');
+                    if (catSelect) catSelect.innerHTML = buildCategoryOptions('expense', 'c14');
+                } else {
+                    amountBlock.style.display = 'block';
+                    debtBlock.style.display = 'none';
+                }
             }
 
             window.updateTransferForm = updateTransferForm;
@@ -1537,7 +1554,7 @@
                 const i = parseFloat(interestEl.value) || 0;
                 const t = parseFloat(totalEl.value) || 0;
                 if (changed === 'principal') {
-                    if (i > 0 && t > 0) { /* ничего не делаем */ }
+                    if (i > 0 && t > 0) { }
                     else if (i > 0) totalEl.value = (p + i).toFixed(2);
                     else if (t > 0) interestEl.value = Math.max(0, t - p).toFixed(2);
                 } else if (changed === 'interest') {
@@ -1582,7 +1599,7 @@
                 const fromAcc = getAccount(fromId);
                 const toAcc = getAccount(toId);
                 if (!fromAcc || !toAcc) return;
-                let amount, principal, interest, convertedAmount;
+                let amount, principal, interest, convertedAmount, categoryId;
                 if (toAcc.isDebt && !fromAcc.isDebt) {
                     principal = parseFloat(document.getElementById('transferPrincipal').value) || 0;
                     interest = parseFloat(document.getElementById('transferInterest').value) || 0;
@@ -1593,12 +1610,14 @@
                     amount = principal + interest;
                     if (amount <= 0) return alert('Введите сумму');
                     convertedAmount = convertCurrency(principal, fromAcc.currency, toAcc.currency);
+                    categoryId = document.getElementById('transferDebtCategory').value || 'c14';
                 } else {
                     amount = parseFloat(document.getElementById('transferAmount').value);
                     if (!amount || amount <= 0) return alert('Введите сумму');
                     convertedAmount = convertCurrency(amount, fromAcc.currency, toAcc.currency);
                     principal = undefined;
                     interest = undefined;
+                    categoryId = undefined;
                 }
                 const transferTx = {
                     id: genId(),
@@ -1613,6 +1632,7 @@
                     convertedAmount: convertedAmount,
                     principal: principal,
                     interest: interest,
+                    categoryId: categoryId,
                     isRecurring: false,
                     recurringPeriod: null
                 };
@@ -1933,13 +1953,15 @@
                         else incomeList.push({ id: catId, name, sum: tx.amount });
                     }
                 });
-                // Добавляем расходы по кредитам
-                if (debtExpenses.length) {
-                    const debtSum = debtExpenses.reduce((s, d) => s + d.amount, 0);
-                    const existing = expenseList.find(e => e.id === 'c14');
-                    if (existing) existing.sum += debtSum;
-                    else expenseList.push({ id: 'c14', name: 'Кредит', sum: debtSum });
-                }
+                // Кредитные расходы с учётом категории
+                debtExpenses.forEach(de => {
+                    const cat = de.categoryId ? getCategory(de.categoryId) : null;
+                    const name = cat ? cat.name : 'Кредит';
+                    const catId = de.categoryId || 'c14';
+                    const existing = expenseList.find(e => e.id === catId);
+                    if (existing) existing.sum += de.amount;
+                    else expenseList.push({ id: catId, name, sum: de.amount });
+                });
                 expenseList.sort((a,b) => b.sum - a.sum);
                 incomeList.sort((a,b) => b.sum - a.sum);
                 const totalExpense = expenseList.reduce((s, e) => s + e.sum, 0);
@@ -2002,48 +2024,45 @@
 
             window.showCategoryTransactionsModal = function(catId, type) {
                 const range = getStatsRange();
-                if (catId === 'c14') {
-                    // специальная обработка для кредитов
-                    const debtTxs = getDebtExpensesInRange(range.start, range.end, 'all', range.inclusiveEnd);
-                    // нужно показать переводы, породившие эти расходы
-                    const transferIds = new Set();
-                    appData.transactions.forEach(tx => {
-                        if (tx.type !== 'transfer') return;
-                        const toAcc = getAccount(tx.transferTo);
-                        if (!toAcc || !toAcc.isDebt) return;
-                        if (tx.date < range.start) return;
-                        if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return;
-                        transferIds.add(tx.id);
+                const txs = [];
+                if (catId === 'c14' || (catId && getCategory(catId)?.type === 'expense')) {
+                    // показать обычные расходы и переводы с этой категорией
+                    const regular = appData.transactions.filter(tx => {
+                        if (tx.type !== type) return false;
+                        if (tx.date < range.start) return false;
+                        if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return false;
+                        return catId ? tx.categoryId === catId : !tx.categoryId;
                     });
-                    const transfers = appData.transactions.filter(tx => transferIds.has(tx.id)).sort((a,b) => b.date.localeCompare(a.date));
-                    const total = transfers.reduce((s, tx) => {
+                    txs.push(...regular);
+                    // переводы с categoryId === catId
+                    const transfers = appData.transactions.filter(tx => {
+                        if (tx.type !== 'transfer') return false;
+                        const toAcc = getAccount(tx.transferTo);
+                        if (!toAcc || !toAcc.isDebt) return false;
+                        if (tx.date < range.start) return false;
+                        if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return false;
+                        return tx.categoryId === catId;
+                    });
+                    txs.push(...transfers);
+                } else {
+                    // без категории
+                    const regular = appData.transactions.filter(tx => {
+                        if (tx.type !== type) return false;
+                        if (tx.date < range.start) return false;
+                        if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return false;
+                        return !tx.categoryId;
+                    });
+                    txs.push(...regular);
+                }
+                txs.sort((a,b) => b.date.localeCompare(a.date));
+                const total = txs.reduce((s, tx) => {
+                    if (tx.type === 'transfer') {
                         const toAcc = getAccount(tx.transferTo);
                         return s + (toAcc.debtType === 'full_payment' ? tx.amount : (tx.interest || 0));
-                    }, 0);
-                    const html = `
-                        <h2>Кредит (Расходы)</h2>
-                        <div style="margin-bottom:12px; font-weight:600;">Всего: ${formatCurrency(total, 'RUB', true)}</div>
-                        <div style="max-height:60vh; overflow-y:auto;">
-                            ${transfers.length ? transfers.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state">Нет транзакций</div>'}
-                        </div>
-                        <button class="btn btn-outline btn-sm" onclick="closeModal()" style="margin-top:12px;">Закрыть</button>
-                    `;
-                    showModal(html);
-                    return;
-                }
-                const txs = appData.transactions.filter(tx => {
-                    if (tx.type !== type) return false;
-                    if (tx.date < range.start) return false;
-                    if (range.inclusiveEnd ? tx.date > range.end : tx.date >= range.end) return false;
-                    if (catId) {
-                        return tx.categoryId === catId;
-                    } else {
-                        return !tx.categoryId;
                     }
-                });
-                txs.sort((a,b) => b.date.localeCompare(a.date));
-                const catName = catId ? getCategory(catId)?.name : 'Без категории';
-                const total = txs.reduce((s, t) => s + t.amount, 0);
+                    return s + tx.amount;
+                }, 0);
+                const catName = catId && getCategory(catId) ? getCategory(catId).name : (type==='income'?'Доходы':'Расходы');
                 const html = `
                     <h2>${catName} (${type==='income'?'Доходы':'Расходы'})</h2>
                     <div style="margin-bottom:12px; font-weight:600;">Всего: ${formatCurrency(total, 'RUB', true)}</div>
@@ -2163,17 +2182,11 @@
                     const toName = toAcc ? toAcc.name : '?';
                     const fromCur = fromAcc?.currency || 'RUB';
                     const toCur = toAcc?.currency || 'RUB';
-                    let desc = '';
-                    if (tx.principal !== undefined && toAcc && toAcc.isDebt) {
-                        desc = `Тело: ${formatAmountHidden(tx.principal, fromCur)}`;
-                        if (tx.interest) desc += `, %: ${formatAmountHidden(tx.interest, fromCur)}`;
-                        desc += ` (→ ${formatAmountHidden(tx.convertedAmount || convertCurrency(tx.principal, fromCur, toCur), toCur)})`;
-                    } else {
-                        desc = formatAmountHidden(tx.amount, fromCur);
-                        if (fromCur !== toCur) {
-                            const conv = tx.convertedAmount || convertCurrency(tx.amount, fromCur, toCur);
-                            desc += ` (→ ${formatAmountHidden(conv, toCur)})`;
-                        }
+                    const amountStr = formatAmountHidden(tx.amount, fromCur);
+                    let extra = '';
+                    if (fromCur !== toCur) {
+                        const conv = tx.convertedAmount || convertCurrency(tx.amount, fromCur, toCur);
+                        extra = ` (→ ${formatAmountHidden(conv, toCur)})`;
                     }
                     return `
                     <div class="transaction-item" onclick="showTransactionModal('${tx.id}')">
@@ -2182,7 +2195,7 @@
                         <div class="tx-category">Перевод</div>
                         <div class="tx-meta">${tx.date} · ${fromName} → ${toName} ${tx.note ? '· '+tx.note : ''}</div>
                       </div>
-                      <div class="tx-amount" style="color: var(--text2);">${desc}</div>
+                      <div class="tx-amount" style="color: var(--text2);">${amountStr}${extra}</div>
                     </div>`;
                 }
                 if (tx.type === 'revaluation') {
@@ -2261,10 +2274,10 @@
                     let spent = getTransactionsInRange(month.start, month.end, b.accountId, month.inclusiveEnd)
                         .filter(t => t.type === 'expense' && t.categoryId === b.categoryId)
                         .reduce((s, t) => s + t.amount, 0);
-                    if (b.categoryId === 'c14') {
-                        spent += getDebtExpensesInRange(month.start, month.end, b.accountId, month.inclusiveEnd)
-                            .reduce((s, d) => s + d.amount, 0);
-                    }
+                    // добавить кредитные расходы по этой категории
+                    spent += getDebtExpensesInRange(month.start, month.end, b.accountId, month.inclusiveEnd)
+                        .filter(de => de.categoryId === b.categoryId)
+                        .reduce((s, de) => s + de.amount, 0);
                     const pct = Math.min(100, Math.round((spent / b.amount) * 100));
                     const barColor = pct > 90 ? '#e17055' : pct > 60 ? '#fdcb6e' : '#00b894';
                     return `
