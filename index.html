@@ -969,7 +969,7 @@
             let dashboardShowUSD = false;
             let hideAmounts = false;
             let showArchivedAccounts = false;
-            let monthlyChartType = 'line'; // 'line' или 'bar'
+            let monthlyChartType = 'bar'; // 'bar' по умолчанию для всех, кроме balance
 
             async function save() { 
                 recalcMonthlyBalances();
@@ -2314,9 +2314,34 @@
                     };
                 };
 
+                // График общего баланса всегда линия
                 if (balanceLabels.length) {
-                    charts.balanceMonthlyChart = new Chart(document.getElementById('balanceMonthlyChart'), getChartConfig(balanceLabels, balanceData, 'Общий баланс', '#6c5ce7', 'rgba(108,92,231,0.1)'));
+                    charts.balanceMonthlyChart = new Chart(document.getElementById('balanceMonthlyChart'), {
+                        type: 'line',
+                        data: {
+                            labels: balanceLabels,
+                            datasets: [{
+                                label: 'Общий баланс',
+                                data: balanceData,
+                                borderColor: '#6c5ce7',
+                                backgroundColor: 'rgba(108,92,231,0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 3
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                x: { ticks: { color: textColor } },
+                                y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } }
+                            }
+                        }
+                    });
                 }
+
                 if (monthLabels.length) {
                     charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), getChartConfig(monthLabels, incomeData, 'Доходы', '#00b894', 'rgba(0,184,148,0.1)'));
                 }
@@ -2616,7 +2641,7 @@
                 document.getElementById('filterDateTo').value = formatLocalDate(lastDayOfMonth);
                 handleStatsPeriodChange();
                 updateEyeButton();
-                updateMonthlyChartButtons(); // обновим кнопки
+                updateMonthlyChartButtons(); // установим активную кнопку (bar)
                 renderAll();
                 switchTab('dashboard');
             }
