@@ -198,6 +198,11 @@
         .btn-warning:hover {
             background: #f0b93e;
         }
+        .btn.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
         .accounts-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -753,7 +758,13 @@
                     </div>
                     <!-- Блок с активами и долгами удалён -->
                     <div class="card">
-                        <div class="card-header">Помесячная динамика</div>
+                        <div class="card-header">
+                            Помесячная динамика
+                            <div class="filters-row" style="margin-bottom:0; gap:8px;">
+                                <button class="btn btn-sm btn-outline" id="monthlyLineBtn" onclick="setMonthlyChartType('line')">Линии</button>
+                                <button class="btn btn-sm btn-outline" id="monthlyBarBtn" onclick="setMonthlyChartType('bar')">Столбцы</button>
+                            </div>
+                        </div>
                         <div class="filters-row" id="monthlyPeriodRow">
                             <select id="monthlyPeriod" onchange="handleMonthlyPeriodChange()" style="padding:8px 14px;border-radius:20px;border:2px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;">
                                 <option value="3months">3 месяца</option>
@@ -958,6 +969,7 @@
             let dashboardShowUSD = false;
             let hideAmounts = false;
             let showArchivedAccounts = false;
+            let monthlyChartType = 'line'; // 'line' или 'bar'
 
             async function save() { 
                 recalcMonthlyBalances();
@@ -2232,6 +2244,22 @@
                 showModal(html);
             };
 
+            function updateMonthlyChartButtons() {
+                const lineBtn = document.getElementById('monthlyLineBtn');
+                const barBtn = document.getElementById('monthlyBarBtn');
+                if (lineBtn && barBtn) {
+                    lineBtn.classList.toggle('active', monthlyChartType === 'line');
+                    barBtn.classList.toggle('active', monthlyChartType === 'bar');
+                }
+            }
+
+            window.setMonthlyChartType = function(type) {
+                if (type !== 'line' && type !== 'bar') return;
+                monthlyChartType = type;
+                updateMonthlyChartButtons();
+                renderMonthlyCharts();
+            };
+
             function renderMonthlyCharts() {
                 destroyCharts(['balanceMonthlyChart', 'incomeMonthlyChart', 'expenseMonthlyChart', 'monthlyChangeChart']);
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
@@ -2254,43 +2282,120 @@
                 const changeData = incomeData.map((inc, i) => inc - expenseData[i]);
                 const monthLabels = months.map(m => m.label);
 
-                if (balanceLabels.length) { charts.balanceMonthlyChart = new Chart(document.getElementById('balanceMonthlyChart'), { type: 'line', data: { labels: balanceLabels, datasets: [{ label: 'Общий баланс', data: balanceData, borderColor: '#6c5ce7', backgroundColor: 'rgba(108,92,231,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
-                if (monthLabels.length) { charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), { type: 'line', data: { labels: monthLabels, datasets: [{ label: 'Доходы', data: incomeData, borderColor: '#00b894', backgroundColor: 'rgba(0,184,148,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
-                if (monthLabels.length) { charts.expenseMonthlyChart = new Chart(document.getElementById('expenseMonthlyChart'), { type: 'line', data: { labels: monthLabels, datasets: [{ label: 'Расходы', data: expenseData, borderColor: '#e17055', backgroundColor: 'rgba(225,112,85,0.1)', fill: true, tension: 0.3, pointRadius: 3 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } } } } }); }
-                if (monthLabels.length) {
-                    charts.monthlyChangeChart = new Chart(document.getElementById('monthlyChangeChart'), {
-                        type: 'bar',
-                        data: {
-                            labels: monthLabels,
-                            datasets: [{
-                                label: 'Изменение баланса',
-                                data: changeData,
-                                backgroundColor: changeData.map(v => v >= 0 ? '#00b894' : '#e17055'),
-                                borderRadius: 4,
-                            }]
-                        },
+                const isBar = monthlyChartType === 'bar';
+                const getChartConfig = (labels, data, label, color, fillColor) => {
+                    const dataset = isBar ? {
+                        label,
+                        data,
+                        backgroundColor: color,
+                        borderRadius: 4,
+                        borderWidth: 0
+                    } : {
+                        label,
+                        data,
+                        borderColor: color,
+                        backgroundColor: fillColor,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 3
+                    };
+                    return {
+                        type: monthlyChartType,
+                        data: { labels, datasets: [dataset] },
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(context) {
-                                            const val = context.raw;
-                                            const formatted = formatCurrency(val, 'RUB', true);
-                                            return val >= 0 ? ' +' + formatted : ' ' + formatted;
-                                        }
-                                    }
-                                }
-                            },
+                            plugins: { legend: { display: false } },
                             scales: {
                                 x: { ticks: { color: textColor } },
                                 y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } }
-                            },
+                            }
                         }
-                    });
+                    };
+                };
+
+                if (balanceLabels.length) {
+                    charts.balanceMonthlyChart = new Chart(document.getElementById('balanceMonthlyChart'), getChartConfig(balanceLabels, balanceData, 'Общий баланс', '#6c5ce7', 'rgba(108,92,231,0.1)'));
                 }
+                if (monthLabels.length) {
+                    charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), getChartConfig(monthLabels, incomeData, 'Доходы', '#00b894', 'rgba(0,184,148,0.1)'));
+                }
+                if (monthLabels.length) {
+                    charts.expenseMonthlyChart = new Chart(document.getElementById('expenseMonthlyChart'), getChartConfig(monthLabels, expenseData, 'Расходы', '#e17055', 'rgba(225,112,85,0.1)'));
+                }
+                if (monthLabels.length) {
+                    if (isBar) {
+                        charts.monthlyChangeChart = new Chart(document.getElementById('monthlyChangeChart'), {
+                            type: 'bar',
+                            data: {
+                                labels: monthLabels,
+                                datasets: [{
+                                    label: 'Изменение баланса',
+                                    data: changeData,
+                                    backgroundColor: changeData.map(v => v >= 0 ? '#00b894' : '#e17055'),
+                                    borderRadius: 4,
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { display: false },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function(context) {
+                                                const val = context.raw;
+                                                const formatted = formatCurrency(val, 'RUB', true);
+                                                return val >= 0 ? ' +' + formatted : ' ' + formatted;
+                                            }
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: { ticks: { color: textColor } },
+                                    y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } }
+                                }
+                            }
+                        });
+                    } else {
+                        charts.monthlyChangeChart = new Chart(document.getElementById('monthlyChangeChart'), {
+                            type: 'line',
+                            data: {
+                                labels: monthLabels,
+                                datasets: [{
+                                    label: 'Изменение баланса',
+                                    data: changeData,
+                                    borderColor: '#6c5ce7',
+                                    backgroundColor: 'rgba(108,92,231,0.1)',
+                                    fill: true,
+                                    tension: 0.3,
+                                    pointRadius: 3,
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { display: false },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function(context) {
+                                                const val = context.raw;
+                                                const formatted = formatCurrency(val, 'RUB', true);
+                                                return val >= 0 ? ' +' + formatted : ' ' + formatted;
+                                            }
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: { ticks: { color: textColor } },
+                                    y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } }
+                                }
+                            }
+                        });
+                    }
+                }
+                updateMonthlyChartButtons();
             }
 
             window.handleMonthlyPeriodChange = function() {
@@ -2511,6 +2616,7 @@
                 document.getElementById('filterDateTo').value = formatLocalDate(lastDayOfMonth);
                 handleStatsPeriodChange();
                 updateEyeButton();
+                updateMonthlyChartButtons(); // обновим кнопки
                 renderAll();
                 switchTab('dashboard');
             }
@@ -2548,6 +2654,7 @@
             window.showCategoryTransactionsModal = showCategoryTransactionsModal;
             window.recalcDebtFields = recalcDebtFields;
             window.recalcDebtFieldsEdit = recalcDebtFieldsEdit;
+            window.setMonthlyChartType = setMonthlyChartType;
 
             init();
         })();
