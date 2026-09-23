@@ -782,8 +782,8 @@
                         <div style="display:flex; flex-direction:column; gap:16px;">
                             <div><div style="font-weight:600; margin-bottom:4px;">График общего баланса</div><div class="chart-container"><canvas id="balanceMonthlyChart"></canvas></div></div>
                             <div><div style="font-weight:600; margin-bottom:4px;">Доход минус расход</div><div class="chart-container"><canvas id="monthlyChangeChart"></canvas></div></div>
-                            <div><div style="font-weight:600; margin-bottom:4px;">График доходов</div><div class="chart-container"><canvas id="incomeMonthlyChart"></canvas></div></div>
-                            <div><div style="font-weight:600; margin-bottom:4px;">График расходов</div><div class="chart-container"><canvas id="expenseMonthlyChart"></canvas></div></div>
+                            <div><div style="font-weight:600; margin-bottom:4px;">График доходов <span style="font-size:0.75rem;color:var(--text2);font-weight:400;">(двойной клик по столбцу — разбивка по категориям)</span></div><div class="chart-container"><canvas id="incomeMonthlyChart"></canvas></div><div id="incomeMonthlyDetail"></div></div>
+                            <div><div style="font-weight:600; margin-bottom:4px;">График расходов <span style="font-size:0.75rem;color:var(--text2);font-weight:400;">(двойной клик по столбцу — разбивка по категориям)</span></div><div class="chart-container"><canvas id="expenseMonthlyChart"></canvas></div><div id="expenseMonthlyDetail"></div></div>
                         </div>
                     </div>
                 </div>
@@ -2260,6 +2260,75 @@
                 renderMonthlyCharts();
             };
 
+            // ---------- НОВОЕ: разбивка по категориям за месяц по двойному клику ----------
+            function showMonthlyCategoryDetail(month, type) {
+                const accountId = document.getElementById('statsAccount')?.value || 'all';
+                const txs = getTransactionsInRange(month.start, month.end, accountId, true);
+                const list = [];
+                txs.forEach(tx => {
+                    if (tx.type !== type) return;
+                    const cat = getCategory(tx.categoryId);
+                    const name = cat?.name || 'Без категории';
+                    const catId = tx.categoryId || null;
+                    const existing = list.find(e => e.id === catId);
+                    if (existing) existing.sum += tx.amount;
+                    else list.push({ id: catId, name, sum: tx.amount });
+                });
+                if (type === 'expense') {
+                    const debts = getDebtExpensesInRange(month.start, month.end, accountId, true);
+                    debts.forEach(de => {
+                        const cat = de.categoryId ? getCategory(de.categoryId) : null;
+                        const name = cat ? cat.name : 'Кредит';
+                        const catId = de.categoryId || 'c14';
+                        const existing = list.find(e => e.id === catId);
+                        if (existing) existing.sum += de.amount;
+                        else list.push({ id: catId, name, sum: de.amount });
+                    });
+                }
+                list.sort((a,b) => b.sum - a.sum);
+                const total = list.reduce((s,e) => s + e.sum, 0);
+                const containerId = type === 'income' ? 'incomeMonthlyDetail' : 'expenseMonthlyDetail';
+                const container = document.getElementById(containerId);
+                if (!container) return;
+                const title = type === 'income' ? 'Доходы' : 'Расходы';
+                const renderList = (items, total) => {
+                    if (items.length === 0) return '<div class="empty-state">Нет данных</div>';
+                    return items.map(({id, name, sum}) => {
+                        const pct = total > 0 ? Math.round((sum / total) * 100) : 0;
+                        const icon = id ? getCategory(id)?.icon : '📌';
+                        const catId = id || '';
+                        return `
+                        <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); cursor:pointer;" onclick="showCategoryTransactionsModal('${catId}', '${type}')">
+                            <span>${icon} ${name}</span>
+                            <span style="font-weight:600;">${formatCurrency(sum, 'RUB', true)} <span style="color:var(--text2); font-size:0.8rem;">${pct}%</span></span>
+                        </div>`;
+                    }).join('');
+                };
+                container.innerHTML = `
+                    <div style="margin-top:12px; padding:12px; background:var(--surface2); border-radius:var(--radius-sm);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <div style="font-weight:600;">${title} за ${month.label}: ${formatCurrency(total, 'RUB', true)}</div>
+                            <button class="btn btn-sm btn-outline" onclick="document.getElementById('${containerId}').innerHTML='';">✕</button>
+                        </div>
+                        ${renderList(list, total)}
+                    </div>
+                `;
+            }
+
+            function attachMonthlyChartDblClick(canvasId, months, type) {
+                const canvas = document.getElementById(canvasId);
+                const chart = charts[canvasId];
+                if (!chart || !canvas) return;
+                canvas.ondblclick = function(evt) {
+                    const points = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, true);
+                    if (!points.length) return;
+                    const idx = points[0].index;
+                    const month = months[idx];
+                    if (!month) return;
+                    showMonthlyCategoryDetail(month, type);
+                };
+            }
+
             function renderMonthlyCharts() {
                 destroyCharts(['balanceMonthlyChart', 'incomeMonthlyChart', 'expenseMonthlyChart', 'monthlyChangeChart']);
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
@@ -2281,6 +2350,12 @@
                 });
                 const changeData = incomeData.map((inc, i) => inc - expenseData[i]);
                 const monthLabels = months.map(m => m.label);
+
+                // Очищаем ранее показанные разбивки при перерисовке
+                const incDet = document.getElementById('incomeMonthlyDetail');
+                const expDet = document.getElementById('expenseMonthlyDetail');
+                if (incDet) incDet.innerHTML = '';
+                if (expDet) expDet.innerHTML = '';
 
                 const isBar = monthlyChartType === 'bar';
                 const getChartConfig = (labels, data, label, color, fillColor) => {
@@ -2344,9 +2419,11 @@
 
                 if (monthLabels.length) {
                     charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), getChartConfig(monthLabels, incomeData, 'Доходы', '#00b894', 'rgba(0,184,148,0.1)'));
+                    attachMonthlyChartDblClick('incomeMonthlyChart', months, 'income');
                 }
                 if (monthLabels.length) {
                     charts.expenseMonthlyChart = new Chart(document.getElementById('expenseMonthlyChart'), getChartConfig(monthLabels, expenseData, 'Расходы', '#e17055', 'rgba(225,112,85,0.1)'));
+                    attachMonthlyChartDblClick('expenseMonthlyChart', months, 'expense');
                 }
                 if (monthLabels.length) {
                     if (isBar) {
