@@ -2193,8 +2193,16 @@
                 if (incomeValues.length) { charts.incomeChart = new Chart(document.getElementById('incomeChart'), { type: 'doughnut', data: { labels: incomeLabels, datasets: [{ data: incomeValues, backgroundColor: ['#00b894', '#00cec9', '#6c5ce7', '#fd79a8', '#a29bfe', '#81ecec'].slice(0, incomeValues.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
             }
 
-            window.showCategoryTransactionsModal = function(catId, type) {
-                const range = getStatsRange();
+            // ИЗМЕНЕНО: добавлены необязательные параметры rangeStart / rangeEnd.
+            // Если они переданы — используется указанный диапазон,
+            // иначе (как и раньше) берётся текущий период статистики.
+            window.showCategoryTransactionsModal = function(catId, type, rangeStart, rangeEnd) {
+                let range;
+                if (rangeStart && rangeEnd) {
+                    range = { start: rangeStart, end: rangeEnd, inclusiveEnd: true };
+                } else {
+                    range = getStatsRange();
+                }
                 let txs = [];
                 if (catId) {
                     const regular = appData.transactions.filter(tx => {
@@ -2260,7 +2268,7 @@
                 renderMonthlyCharts();
             };
 
-            // ---------- НОВОЕ: разбивка по категориям за месяц по двойному клику ----------
+            // ---------- разбивка по категориям за месяц по двойному клику ----------
             function showMonthlyCategoryDetail(month, type) {
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
                 const txs = getTransactionsInRange(month.start, month.end, accountId, true);
@@ -2297,8 +2305,10 @@
                         const pct = total > 0 ? Math.round((sum / total) * 100) : 0;
                         const icon = id ? getCategory(id)?.icon : '📌';
                         const catId = id || '';
+                        // ИЗМЕНЕНО: передаём начало и конец месяца,
+                        // чтобы модальное окно показало транзакции именно за этот месяц.
                         return `
-                        <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); cursor:pointer;" onclick="showCategoryTransactionsModal('${catId}', '${type}')">
+                        <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); cursor:pointer;" onclick="showCategoryTransactionsModal('${catId}', '${type}', '${month.start}', '${month.end}')">
                             <span>${icon} ${name}</span>
                             <span style="font-weight:600;">${formatCurrency(sum, 'RUB', true)} <span style="color:var(--text2); font-size:0.8rem;">${pct}%</span></span>
                         </div>`;
