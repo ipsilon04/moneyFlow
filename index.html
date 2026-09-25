@@ -584,6 +584,60 @@
             margin-bottom: 16px;
             flex-wrap: wrap;
         }
+        /* ---------- Календарь ---------- */
+        .cal-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+        .cal-weekday {
+            text-align: center;
+            font-size: 0.7rem;
+            color: var(--text2);
+            font-weight: 700;
+            padding: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .cal-cell {
+            padding: 6px 4px;
+            border-radius: 8px;
+            min-height: 56px;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            transition: all var(--transition);
+        }
+        .cal-cell.empty {
+            border-color: transparent;
+            background: transparent;
+        }
+        .cal-day {
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+        .cal-day.weekend {
+            color: var(--expense);
+        }
+        .cal-sum {
+            font-size: 0.68rem;
+            font-weight: 700;
+            margin-top: 3px;
+            color: var(--expense);
+            white-space: nowrap;
+        }
+        .cal-cell.today {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+        .cal-cell.today .cal-day,
+        .cal-cell.today .cal-sum {
+            color: #fff;
+        }
         @media (max-width: 768px) {
             .sidebar {
                 display: none;
@@ -640,6 +694,13 @@
                 background: var(--surface);
                 z-index: 49;
             }
+            .cal-cell {
+                min-height: 48px;
+                padding: 4px 2px;
+            }
+            .cal-sum {
+                font-size: 0.6rem;
+            }
         }
     </style>
 </head>
@@ -683,7 +744,14 @@
                     <div class="card stat-card"><div class="stat-value" id="dashTotalDebts">0 ₽</div><div class="stat-label">Сумма долгов</div></div>
                     <div class="card stat-card"><div class="stat-value" id="dashTotalAssets">0 ₽</div><div class="stat-label">Сумма активов</div></div>
                 </div>
-                <div class="card"><div class="card-header">Последние транзакции</div><div id="recentTransactions"></div></div>
+                <div class="card">
+                    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <button class="btn btn-sm btn-outline" onclick="changeCalendarMonth(-1)" title="Предыдущий месяц">←</button>
+                        <span id="calendarMonthLabel" style="font-weight:700;">Месяц</span>
+                        <button class="btn btn-sm btn-outline" onclick="changeCalendarMonth(1)" title="Следующий месяц">→</button>
+                    </div>
+                    <div id="dashboardCalendar"></div>
+                </div>
             </div>
             <div class="tab-content" id="tab-accounts">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
@@ -725,7 +793,6 @@
                     <button class="filter-chip" data-filter="income">Доходы</button>
                     <button class="filter-chip" data-filter="expense">Расходы</button>
                     <button class="filter-chip" data-filter="transfer">Переводы</button>
-                    <button class="filter-chip" data-filter="revaluation">Изменение цены</button>
                     <input type="date" id="filterDateFrom" onchange="renderTransactions()" style="padding:6px 10px;border-radius:20px;border:2px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:0.8rem;">
                     <input type="date" id="filterDateTo" onchange="renderTransactions()" style="padding:6px 10px;border-radius:20px;border:2px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:0.8rem;">
                     <select id="filterAccount" onchange="renderTransactions()" style="padding:6px 10px;border-radius:20px;border:2px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:0.8rem;">
@@ -756,14 +823,9 @@
                         <div class="card"><div class="card-header">Расходы по категориям</div><div class="chart-container"><canvas id="expenseChart"></canvas></div><div id="expenseDetail" style="margin-top:12px;"></div></div>
                         <div class="card"><div class="card-header">Доходы по категориям</div><div class="chart-container"><canvas id="incomeChart"></canvas></div><div id="incomeDetail" style="margin-top:12px;"></div></div>
                     </div>
-                    <!-- Блок с активами и долгами удалён -->
                     <div class="card">
                         <div class="card-header">
                             Помесячная динамика
-                            <div class="filters-row" style="margin-bottom:0; gap:8px;">
-                                <button class="btn btn-sm btn-outline" id="monthlyLineBtn" onclick="setMonthlyChartType('line')">Линии</button>
-                                <button class="btn btn-sm btn-outline" id="monthlyBarBtn" onclick="setMonthlyChartType('bar')">Столбцы</button>
-                            </div>
                         </div>
                         <div class="filters-row" id="monthlyPeriodRow">
                             <select id="monthlyPeriod" onchange="handleMonthlyPeriodChange()" style="padding:8px 14px;border-radius:20px;border:2px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;">
@@ -953,7 +1015,6 @@
                         { id: 'c10', name: 'Кафе', type: 'expense', icon: '🍕', color: '#e17055' },
                         { id: 'c11', name: 'Одежда', type: 'expense', icon: '👕', color: '#a29bfe' },
                         { id: 'c12', name: 'Связь', type: 'expense', icon: '📱', color: '#636e72' },
-                        { id: 'c13', name: 'Изменение цены', type: 'revaluation', icon: '💱', color: '#a29bfe' },
                         { id: 'c14', name: 'Кредит', type: 'expense', icon: '🏦', color: '#e17055' },
                     ],
                     transactions: [],
@@ -969,7 +1030,7 @@
             let dashboardShowUSD = false;
             let hideAmounts = false;
             let showArchivedAccounts = false;
-            let monthlyChartType = 'bar'; // 'bar' по умолчанию для всех, кроме balance
+            let calendarDate = new Date();
 
             async function save() { 
                 recalcMonthlyBalances();
@@ -1050,9 +1111,11 @@
             function getAccount(id) { return appData.accounts.find(a => a.id === id); }
             function getCategory(id) { return appData.categories.find(c => c.id === id); }
 
+            // ИЗМЕНЕНО: игнорируем транзакции, у которых excluded = true
             function getTransactionsInRange(start, end, accountId = 'all', inclusiveEnd = true) {
                 return appData.transactions.filter(tx => {
                     if (tx.type !== 'income' && tx.type !== 'expense') return false;
+                    if (tx.excluded) return false;
                     if (tx.date < start) return false;
                     if (inclusiveEnd ? tx.date > end : tx.date >= end) return false;
                     if (accountId !== 'all' && tx.accountId !== accountId) return false;
@@ -1060,9 +1123,11 @@
                 });
             }
 
+            // ИЗМЕНЕНО: игнорируем переводы с excluded = true
             function getDebtExpensesInRange(start, end, accountId, inclusiveEnd) {
                 return appData.transactions.filter(tx => {
                     if (tx.type !== 'transfer') return false;
+                    if (tx.excluded) return false;
                     const toAcc = getAccount(tx.transferTo);
                     if (!toAcc || !toAcc.isDebt) return false;
                     const fromAcc = getAccount(tx.transferFrom);
@@ -1404,7 +1469,6 @@
                   <div class="form-group"><label>Тип</label><select id="txType" onchange="updateTxCatOptions()">
                     <option value="expense" ${initialType==='expense'?'selected':''}>Расход</option>
                     <option value="income" ${initialType==='income'?'selected':''}>Доход</option>
-                    <option value="revaluation" ${initialType==='revaluation'?'selected':''}>Изменение цены</option>
                   </select></div>
                   <div class="form-group"><label>Сумма</label><input type="number" id="txAmount" value="${tx?.amount||''}" step="0.01" placeholder="0"></div>
                 </div>
@@ -1413,6 +1477,10 @@
                 <div class="form-group"><label>Дата</label><input type="date" id="txDate" value="${tx?.date||new Date().toISOString().slice(0,10)}"></div>
                 <div class="form-group"><label>Теги (через запятую)</label><input id="txTags" value="${tx?.tags?.join(',')||''}" placeholder="например: работа, еда"></div>
                 <div class="form-group"><label>Заметка</label><input id="txNote" value="${tx?.note||''}" placeholder="Описание..."></div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="txExcluded" ${tx?.excluded?'checked':''}>
+                  <label for="txExcluded">Не учитывать в доходах/расходах</label>
+                </div>
                 <div class="checkbox-group">
                   <input type="checkbox" id="txRecurring" ${tx?.isRecurring?'checked':''} onchange="document.getElementById('recurringPeriod').style.display=this.checked?'block':'none'">
                   <label for="txRecurring">Повторяющаяся транзакция</label>
@@ -1458,19 +1526,19 @@
                 const note = document.getElementById('txNote').value.trim();
                 const tagsRaw = document.getElementById('txTags').value;
                 const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+                const excluded = document.getElementById('txExcluded').checked;
                 const isRecurring = document.getElementById('txRecurring').checked;
                 const recurringPeriod = isRecurring ? document.getElementById('txPeriod').value : null;
                 if (!amount) return alert('Введите сумму');
                 if (!date) return alert('Выберите дату');
                 if (!categoryId) return alert('Выберите категорию');
-                if (type === 'revaluation') { const cat = getCategory(categoryId); if (!cat || cat.type !== 'revaluation') return alert('Выберите категорию "Изменение цены"'); }
                 const oldTx = editingId ? appData.transactions.find(t => t.id === editingId) : null;
                 if (oldTx) {
                     if (oldTx.type === 'transfer') applyTransfer(oldTx, true);
                     else if (oldTx.type === 'revaluation') { const acc = getAccount(oldTx.accountId); if (acc) acc.balance -= oldTx.amount; }
                     else { updateAccountBalance(oldTx, true); }
                 }
-                const txData = { id: editingId || genId(), type, amount, accountId, categoryId, date, note, tags, isRecurring, recurringPeriod };
+                const txData = { id: editingId || genId(), type, amount, accountId, categoryId, date, note, tags, isRecurring, recurringPeriod, excluded };
                 if (editingId) { const idx = appData.transactions.findIndex(t => t.id === editingId); if (idx >= 0) appData.transactions[idx] = txData; }
                 else { appData.transactions.push(txData); }
                 if (type === 'revaluation') { const acc = getAccount(accountId); if (acc) acc.balance += amount; }
@@ -1641,7 +1709,8 @@
                     interest: interest,
                     categoryId: categoryId,
                     isRecurring: false,
-                    recurringPeriod: null
+                    recurringPeriod: null,
+                    excluded: false
                 };
                 applyTransfer(transferTx, false);
                 appData.transactions.push(transferTx);
@@ -1811,21 +1880,22 @@
                 csv += 'Тип;Название;Тип категории;Иконка;Цвет\n';
                 appData.categories.forEach(c => { csv += `Категория;${c.name};${c.type};${c.icon};${c.color}\n`; });
                 csv += '\n[Транзакции]\n';
-                csv += 'Дата;Тип;Сумма;ВалютаОтправителя;СчетОтправитель;СчетПолучатель;КонвертированнаяСумма;Тело;Проценты;Категория;Заметка;Теги\n';
+                csv += 'Дата;Тип;Сумма;ВалютаОтправителя;СчетОтправитель;СчетПолучатель;КонвертированнаяСумма;Тело;Проценты;Категория;Заметка;Теги;Исключено\n';
                 appData.transactions.forEach(tx => {
+                    const excl = tx.excluded ? 'true' : 'false';
                     if (tx.type === 'transfer') {
                         const fromAcc = getAccount(tx.transferFrom);
                         const toAcc = getAccount(tx.transferTo);
                         const cat = tx.categoryId ? getCategory(tx.categoryId) : null;
-                        csv += `${tx.date};Перевод;${tx.amount};${fromAcc?.currency||''};${fromAcc?.name||''};${toAcc?.name||''};${tx.convertedAmount||''};${tx.principal||''};${tx.interest||''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`;
+                        csv += `${tx.date};Перевод;${tx.amount};${fromAcc?.currency||''};${fromAcc?.name||''};${toAcc?.name||''};${tx.convertedAmount||''};${tx.principal||''};${tx.interest||''};${cat?.name||''};${tx.note};${tx.tags.join(' ')};${excl}\n`;
                     } else if (tx.type === 'revaluation') {
                         const acc = getAccount(tx.accountId);
                         const cat = getCategory(tx.categoryId);
-                        csv += `${tx.date};Изменение цены;${tx.amount};${acc?.currency||''};${acc?.name||''};;${''};${''};${''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`;
+                        csv += `${tx.date};Изменение цены;${tx.amount};${acc?.currency||''};${acc?.name||''};;${''};${''};${''};${cat?.name||''};${tx.note};${tx.tags.join(' ')};${excl}\n`;
                     } else {
                         const acc = getAccount(tx.accountId);
                         const cat = getCategory(tx.categoryId);
-                        csv += `${tx.date};${tx.type==='income'?'Доход':'Расход'};${tx.amount};${acc?.currency||''};${acc?.name||''};;${''};${''};${''};${cat?.name||''};${tx.note};${tx.tags.join(' ')}\n`;
+                        csv += `${tx.date};${tx.type==='income'?'Доход':'Расход'};${tx.amount};${acc?.currency||''};${acc?.name||''};;${''};${''};${''};${cat?.name||''};${tx.note};${tx.tags.join(' ')};${excl}\n`;
                     }
                 });
                 csv += '\n[Балансы счетов]\n';
@@ -1883,6 +1953,7 @@
                         const date = cols[0]?.trim();
                         if (!date || cols.length < 3) continue;
                         const typeStr = cols[1]?.trim().toLowerCase();
+                        const excluded = cols[12]?.trim().toLowerCase() === 'true';
                         if (typeStr === 'перевод') {
                             const amount = parseFloat(cols[2]?.replace(',', '.'));
                             if (isNaN(amount)) continue;
@@ -1927,7 +1998,8 @@
                                 interest: interest,
                                 categoryId: categoryId,
                                 isRecurring: false,
-                                recurringPeriod: null
+                                recurringPeriod: null,
+                                excluded: excluded
                             };
                             applyTransfer(tx, false);
                             appData.transactions.push(tx);
@@ -1955,7 +2027,7 @@
                                 const cat = appData.categories.find(c => c.name === categoryName && c.type === categoryType);
                                 if (cat) categoryId = cat.id;
                             }
-                            const tx = { id: genId(), type, amount, accountId: account.id, categoryId: categoryId, date, note, tags, isRecurring: false, recurringPeriod: null };
+                            const tx = { id: genId(), type, amount, accountId: account.id, categoryId: categoryId, date, note, tags, isRecurring: false, recurringPeriod: null, excluded: excluded };
                             if (type === 'revaluation') { account.balance += amount; }
                             else { updateAccountBalance(tx, false); }
                             appData.transactions.push(tx);
@@ -2001,7 +2073,7 @@
             function showCategoriesModal() {
                 let listHtml = appData.categories.map(c => `
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
-                  <span>${c.icon} ${c.name} <span style="color:var(--text2);font-size:0.8rem;">(${c.type==='income'?'доход':c.type==='expense'?'расход':'изм. цены'})</span></span>
+                  <span>${c.icon} ${c.name} <span style="color:var(--text2);font-size:0.8rem;">(${c.type==='income'?'доход':'расход'})</span></span>
                   <div style="display:flex;gap:4px;">
                     <button class="btn btn-sm btn-outline" onclick="showEditCategoryModal('${c.id}')">✏️</button>
                     <button class="btn btn-sm btn-outline" onclick="deleteCategory('${c.id}')">🗑</button>
@@ -2016,7 +2088,6 @@
                   <div class="form-group"><label>Тип</label><select id="newCatType">
                     <option value="income">Доход</option>
                     <option value="expense" selected>Расход</option>
-                    <option value="revaluation">Изменение цены</option>
                   </select></div>
                 </div>
                 <div class="form-row">
@@ -2038,7 +2109,6 @@
                   <div class="form-group"><label>Тип</label><select id="editCatType">
                     <option value="income" ${cat.type==='income'?'selected':''}>Доход</option>
                     <option value="expense" ${cat.type==='expense'?'selected':''}>Расход</option>
-                    <option value="revaluation" ${cat.type==='revaluation'?'selected':''}>Изменение цены</option>
                   </select></div>
                 </div>
                 <div class="form-row">
@@ -2178,8 +2248,6 @@
                     ${renderCatList(incomeList, totalIncome, 'income')}
                 `;
 
-                // Удалено отображение активов и долгов
-
                 const expenseLabels = expenseList.map(e => { const pct = totalExpense > 0 ? Math.round((e.sum / totalExpense) * 100) : 0; return `${e.name} (${pct}%)`; });
                 const expenseValues = expenseList.map(e => e.sum);
                 const incomeLabels = incomeList.map(e => { const pct = totalIncome > 0 ? Math.round((e.sum / totalIncome) * 100) : 0; return `${e.name} (${pct}%)`; });
@@ -2193,9 +2261,6 @@
                 if (incomeValues.length) { charts.incomeChart = new Chart(document.getElementById('incomeChart'), { type: 'doughnut', data: { labels: incomeLabels, datasets: [{ data: incomeValues, backgroundColor: ['#00b894', '#00cec9', '#6c5ce7', '#fd79a8', '#a29bfe', '#81ecec'].slice(0, incomeValues.length), borderWidth: 2, borderColor: surfaceColor }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: noLegend } } }); }
             }
 
-            // ИЗМЕНЕНО: добавлены необязательные параметры rangeStart / rangeEnd.
-            // Если они переданы — используется указанный диапазон,
-            // иначе (как и раньше) берётся текущий период статистики.
             window.showCategoryTransactionsModal = function(catId, type, rangeStart, rangeEnd) {
                 let range;
                 if (rangeStart && rangeEnd) {
@@ -2252,23 +2317,6 @@
                 showModal(html);
             };
 
-            function updateMonthlyChartButtons() {
-                const lineBtn = document.getElementById('monthlyLineBtn');
-                const barBtn = document.getElementById('monthlyBarBtn');
-                if (lineBtn && barBtn) {
-                    lineBtn.classList.toggle('active', monthlyChartType === 'line');
-                    barBtn.classList.toggle('active', monthlyChartType === 'bar');
-                }
-            }
-
-            window.setMonthlyChartType = function(type) {
-                if (type !== 'line' && type !== 'bar') return;
-                monthlyChartType = type;
-                updateMonthlyChartButtons();
-                renderMonthlyCharts();
-            };
-
-            // ---------- разбивка по категориям за месяц по двойному клику ----------
             function showMonthlyCategoryDetail(month, type) {
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
                 const txs = getTransactionsInRange(month.start, month.end, accountId, true);
@@ -2305,8 +2353,6 @@
                         const pct = total > 0 ? Math.round((sum / total) * 100) : 0;
                         const icon = id ? getCategory(id)?.icon : '📌';
                         const catId = id || '';
-                        // ИЗМЕНЕНО: передаём начало и конец месяца,
-                        // чтобы модальное окно показало транзакции именно за этот месяц.
                         return `
                         <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border); cursor:pointer;" onclick="showCategoryTransactionsModal('${catId}', '${type}', '${month.start}', '${month.end}')">
                             <span>${icon} ${name}</span>
@@ -2339,6 +2385,7 @@
                 };
             }
 
+            // ИЗМЕНЕНО: убран переключатель типа графика. Баланс всегда линия, остальные — столбцы.
             function renderMonthlyCharts() {
                 destroyCharts(['balanceMonthlyChart', 'incomeMonthlyChart', 'expenseMonthlyChart', 'monthlyChangeChart']);
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
@@ -2361,32 +2408,15 @@
                 const changeData = incomeData.map((inc, i) => inc - expenseData[i]);
                 const monthLabels = months.map(m => m.label);
 
-                // Очищаем ранее показанные разбивки при перерисовке
                 const incDet = document.getElementById('incomeMonthlyDetail');
                 const expDet = document.getElementById('expenseMonthlyDetail');
                 if (incDet) incDet.innerHTML = '';
                 if (expDet) expDet.innerHTML = '';
 
-                const isBar = monthlyChartType === 'bar';
-                const getChartConfig = (labels, data, label, color, fillColor) => {
-                    const dataset = isBar ? {
-                        label,
-                        data,
-                        backgroundColor: color,
-                        borderRadius: 4,
-                        borderWidth: 0
-                    } : {
-                        label,
-                        data,
-                        borderColor: color,
-                        backgroundColor: fillColor,
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 3
-                    };
+                const getBarConfig = (labels, data, label, color) => {
                     return {
-                        type: monthlyChartType,
-                        data: { labels, datasets: [dataset] },
+                        type: 'bar',
+                        data: { labels, datasets: [{ label, data, backgroundColor: color, borderRadius: 4, borderWidth: 0 }] },
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
@@ -2399,7 +2429,7 @@
                     };
                 };
 
-                // График общего баланса всегда линия
+                // График общего баланса — всегда линия
                 if (balanceLabels.length) {
                     charts.balanceMonthlyChart = new Chart(document.getElementById('balanceMonthlyChart'), {
                         type: 'line',
@@ -2428,86 +2458,47 @@
                 }
 
                 if (monthLabels.length) {
-                    charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), getChartConfig(monthLabels, incomeData, 'Доходы', '#00b894', 'rgba(0,184,148,0.1)'));
+                    charts.incomeMonthlyChart = new Chart(document.getElementById('incomeMonthlyChart'), getBarConfig(monthLabels, incomeData, 'Доходы', '#00b894'));
                     attachMonthlyChartDblClick('incomeMonthlyChart', months, 'income');
                 }
                 if (monthLabels.length) {
-                    charts.expenseMonthlyChart = new Chart(document.getElementById('expenseMonthlyChart'), getChartConfig(monthLabels, expenseData, 'Расходы', '#e17055', 'rgba(225,112,85,0.1)'));
+                    charts.expenseMonthlyChart = new Chart(document.getElementById('expenseMonthlyChart'), getBarConfig(monthLabels, expenseData, 'Расходы', '#e17055'));
                     attachMonthlyChartDblClick('expenseMonthlyChart', months, 'expense');
                 }
                 if (monthLabels.length) {
-                    if (isBar) {
-                        charts.monthlyChangeChart = new Chart(document.getElementById('monthlyChangeChart'), {
-                            type: 'bar',
-                            data: {
-                                labels: monthLabels,
-                                datasets: [{
-                                    label: 'Изменение баланса',
-                                    data: changeData,
-                                    backgroundColor: changeData.map(v => v >= 0 ? '#00b894' : '#e17055'),
-                                    borderRadius: 4,
-                                }]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: {
-                                    legend: { display: false },
-                                    tooltip: {
-                                        callbacks: {
-                                            label: function(context) {
-                                                const val = context.raw;
-                                                const formatted = formatCurrency(val, 'RUB', true);
-                                                return val >= 0 ? ' +' + formatted : ' ' + formatted;
-                                            }
+                    charts.monthlyChangeChart = new Chart(document.getElementById('monthlyChangeChart'), {
+                        type: 'bar',
+                        data: {
+                            labels: monthLabels,
+                            datasets: [{
+                                label: 'Изменение баланса',
+                                data: changeData,
+                                backgroundColor: changeData.map(v => v >= 0 ? '#00b894' : '#e17055'),
+                                borderRadius: 4,
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const val = context.raw;
+                                            const formatted = formatCurrency(val, 'RUB', true);
+                                            return val >= 0 ? ' +' + formatted : ' ' + formatted;
                                         }
                                     }
-                                },
-                                scales: {
-                                    x: { ticks: { color: textColor } },
-                                    y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } }
                                 }
-                            }
-                        });
-                    } else {
-                        charts.monthlyChangeChart = new Chart(document.getElementById('monthlyChangeChart'), {
-                            type: 'line',
-                            data: {
-                                labels: monthLabels,
-                                datasets: [{
-                                    label: 'Изменение баланса',
-                                    data: changeData,
-                                    borderColor: '#6c5ce7',
-                                    backgroundColor: 'rgba(108,92,231,0.1)',
-                                    fill: true,
-                                    tension: 0.3,
-                                    pointRadius: 3,
-                                }]
                             },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: {
-                                    legend: { display: false },
-                                    tooltip: {
-                                        callbacks: {
-                                            label: function(context) {
-                                                const val = context.raw;
-                                                const formatted = formatCurrency(val, 'RUB', true);
-                                                return val >= 0 ? ' +' + formatted : ' ' + formatted;
-                                            }
-                                        }
-                                    }
-                                },
-                                scales: {
-                                    x: { ticks: { color: textColor } },
-                                    y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } }
-                                }
+                            scales: {
+                                x: { ticks: { color: textColor } },
+                                y: { ticks: { color: textColor, callback: v => formatCurrency(v, 'RUB', true) } }
                             }
-                        });
-                    }
+                        }
+                    });
                 }
-                updateMonthlyChartButtons();
             }
 
             window.handleMonthlyPeriodChange = function() {
@@ -2535,6 +2526,65 @@
                 updateTransferForm();
             }
 
+            // ---------- Календарь на странице Обзор ----------
+            window.changeCalendarMonth = function(delta) {
+                calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + delta, 1);
+                renderCalendar();
+            };
+
+            function renderCalendar() {
+                const year = calendarDate.getFullYear();
+                const month = calendarDate.getMonth();
+                const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+                const labelEl = document.getElementById('calendarMonthLabel');
+                if (labelEl) labelEl.textContent = monthNames[month] + ' ' + year;
+
+                const firstDay = new Date(year, month, 1);
+                const lastDay = new Date(year, month + 1, 0);
+                const daysInMonth = lastDay.getDate();
+                const startWeekday = (firstDay.getDay() + 6) % 7; // 0 = Пн
+                const monthStart = formatLocalDate(firstDay);
+                const monthEnd = formatLocalDate(lastDay);
+
+                const dailyExpenses = {};
+                const txs = getTransactionsInRange(monthStart, monthEnd, 'all', true);
+                txs.forEach(tx => {
+                    if (tx.type === 'expense') {
+                        dailyExpenses[tx.date] = (dailyExpenses[tx.date] || 0) + tx.amount;
+                    }
+                });
+                const debtExps = getDebtExpensesInRange(monthStart, monthEnd, 'all', true);
+                debtExps.forEach(d => {
+                    dailyExpenses[d.date] = (dailyExpenses[d.date] || 0) + d.amount;
+                });
+
+                const today = formatLocalDate(new Date());
+                const weekdays = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+                let html = '<div class="cal-grid">';
+                weekdays.forEach(w => {
+                    html += `<div class="cal-weekday">${w}</div>`;
+                });
+                for (let i = 0; i < startWeekday; i++) {
+                    html += '<div class="cal-cell empty"></div>';
+                }
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const sum = dailyExpenses[dayStr] || 0;
+                    const isToday = dayStr === today;
+                    const weekday = (startWeekday + d - 1) % 7;
+                    const isWeekend = weekday >= 5;
+                    const sumStr = sum > 0 ? (hideAmounts ? '***' : Math.round(sum).toLocaleString('ru-RU')) : '';
+                    html += `
+                        <div class="cal-cell${isToday ? ' today' : ''}">
+                            <div class="cal-day${isWeekend && !isToday ? ' weekend' : ''}">${d}</div>
+                            ${sum > 0 ? `<div class="cal-sum">${sumStr}</div>` : ''}
+                        </div>`;
+                }
+                html += '</div>';
+                const el = document.getElementById('dashboardCalendar');
+                if (el) el.innerHTML = html;
+            }
+
             function renderDashboard() {
                 const month = getMonthRange();
                 const txMonth = getTransactionsInRange(month.start, month.end, 'all', month.inclusiveEnd);
@@ -2555,9 +2605,8 @@
                 document.getElementById('dashExpense').textContent = formatAmountHidden(expense, 'RUB', true);
                 document.getElementById('dashTotalDebts').textContent = formatAmountHidden(totalDebtsRub, 'RUB', true);
                 document.getElementById('dashTotalAssets').textContent = formatAmountHidden(totalAssetsRub, 'RUB', true);
-                const recent = [...appData.transactions].sort((a,b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, 8);
-                document.getElementById('recentTransactions').innerHTML = recent.length ? recent.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет транзакций</div>';
                 updateEyeButton();
+                renderCalendar();
             }
 
             window.toggleDashboardCurrency = function() { dashboardShowUSD = !dashboardShowUSD; renderDashboard(); };
@@ -2603,7 +2652,7 @@
                     <div class="transaction-item" onclick="showTransactionModal('${tx.id}')">
                       <div class="tx-icon">🔄</div>
                       <div class="tx-info">
-                        <div class="tx-category">Перевод</div>
+                        <div class="tx-category">Перевод${tx.excluded ? ' <span class="tag" style="background:#fdcb6e;color:#1a1d28;">не учитывать</span>' : ''}</div>
                         <div class="tx-meta">${tx.date} · ${fromName} → ${toName} ${tx.note ? '· '+tx.note : ''}</div>
                       </div>
                       <div class="tx-amount" style="color: var(--text2);">${amountStr}${extra}</div>
@@ -2631,11 +2680,12 @@
                 const name = cat?.name || (tx.note || 'Без категории');
                 const sign = tx.type === 'income' ? '+' : '-';
                 const cls = tx.type === 'income' ? 'income' : 'expense';
+                const exclTag = tx.excluded ? ' <span class="tag" style="background:#fdcb6e;color:#1a1d28;">не учитывать</span>' : '';
                 return `
                 <div class="transaction-item" onclick="showTransactionModal('${tx.id}')">
                   <div class="tx-icon">${icon}</div>
                   <div class="tx-info">
-                    <div class="tx-category">${name}</div>
+                    <div class="tx-category">${name}${exclTag}</div>
                     <div class="tx-meta">${tx.date} · ${acc?.name||'?'} ${tx.note?'· '+tx.note:''} ${tx.tags.length?tx.tags.map(t=>'<span class="tag">'+t+'</span>').join(''):''}</div>
                   </div>
                   <div class="tx-amount ${cls}">${sign}${formatAmountHidden(tx.amount, acc?.currency||'RUB')}</div>
@@ -2664,7 +2714,6 @@
                 if (filterType === 'income') txs = txs.filter(t => t.type === 'income');
                 else if (filterType === 'expense') txs = txs.filter(t => t.type === 'expense');
                 else if (filterType === 'transfer') txs = txs.filter(t => t.type === 'transfer');
-                else if (filterType === 'revaluation') txs = txs.filter(t => t.type === 'revaluation');
                 if (dateFrom) txs = txs.filter(t => t.date >= dateFrom);
                 if (dateTo) txs = txs.filter(t => t.date <= dateTo);
                 if (accountId !== 'all') txs = txs.filter(t => t.accountId === accountId || t.transferFrom === accountId || t.transferTo === accountId);
@@ -2717,6 +2766,7 @@
                 appData = await loadData();
                 if (!appData.monthlyBalances) appData.monthlyBalances = [];
                 appData.accounts.forEach(a => { if (a.archived === undefined) a.archived = false; if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only'; });
+                appData.transactions.forEach(tx => { if (tx.excluded === undefined) tx.excluded = false; });
                 recalcMonthlyBalances();
                 processRecurring();
                 updateAccountSelects();
@@ -2728,7 +2778,6 @@
                 document.getElementById('filterDateTo').value = formatLocalDate(lastDayOfMonth);
                 handleStatsPeriodChange();
                 updateEyeButton();
-                updateMonthlyChartButtons(); // установим активную кнопку (bar)
                 renderAll();
                 switchTab('dashboard');
             }
@@ -2766,7 +2815,7 @@
             window.showCategoryTransactionsModal = showCategoryTransactionsModal;
             window.recalcDebtFields = recalcDebtFields;
             window.recalcDebtFieldsEdit = recalcDebtFieldsEdit;
-            window.setMonthlyChartType = setMonthlyChartType;
+            window.changeCalendarMonth = changeCalendarMonth;
 
             init();
         })();
