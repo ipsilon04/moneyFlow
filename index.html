@@ -207,7 +207,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
             gap: 14px;
-            margin-bottom: 20px;
+            margin-bottom: 8px;
         }
         .account-card {
             background: var(--surface);
@@ -243,6 +243,55 @@
         .account-card .acc-name {
             font-weight: 600;
             font-size: 0.9rem;
+        }
+        /* ---------- Папки счетов ---------- */
+        .account-folder {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            margin-bottom: 12px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+        .folder-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 18px;
+            cursor: pointer;
+            font-weight: 700;
+            transition: all var(--transition);
+            user-select: none;
+        }
+        .folder-header:hover {
+            background: var(--surface2);
+        }
+        .folder-icon {
+            font-size: 1.2rem;
+        }
+        .folder-title {
+            flex: 1;
+            font-size: 0.95rem;
+        }
+        .folder-sum {
+            font-weight: 700;
+            color: var(--text2);
+            font-size: 0.9rem;
+        }
+        .folder-chevron {
+            font-size: 0.7rem;
+            color: var(--text2);
+            transition: transform var(--transition);
+        }
+        .folder-chevron.collapsed {
+            transform: rotate(-90deg);
+        }
+        .folder-content {
+            padding: 4px 16px 16px;
+            border-top: 1px solid var(--border);
+        }
+        .folder-content.hidden {
+            display: none;
         }
         .transaction-item {
             display: flex;
@@ -768,7 +817,14 @@
                     <h2>💳 Счета</h2>
                     <button class="btn btn-primary" onclick="showAccountModal()">+ Добавить счёт</button>
                 </div>
-                <div class="accounts-grid" id="allAccounts"></div>
+                <div id="allAccounts"></div>
+                <div class="card" style="margin-top:16px;">
+                    <div class="card-header">Распределение по категориям</div>
+                    <div style="max-width:400px;margin:0 auto;">
+                        <div class="chart-container"><canvas id="accountsDistributionChart"></canvas></div>
+                    </div>
+                    <div id="accountsDistributionTable" style="margin-top:12px;"></div>
+                </div>
                 <div class="card" style="margin-top:16px;"><div class="card-header">Перевод между счетами</div>
                     <div class="form-row">
                         <div class="form-group"><label>Со счета</label><select id="transferFrom" onchange="updateTransferForm()"></select></div>
@@ -970,6 +1026,45 @@
             const SETTINGS_KEY = 'moneyflow_settings';
             const RATES_KEY = 'moneyflow_rates';
 
+            const ACCOUNT_TYPES = {
+                rubles: 'Рубли',
+                deposit: 'Вклад',
+                currency: 'Валюта',
+                stocks: 'Акции',
+                bonds: 'Облигации',
+                realestate: 'Недвижимость',
+                movable: 'Движимость',
+                crypto: 'Криптовалюта'
+            };
+            const ACCOUNT_TYPE_ORDER = ['rubles', 'deposit', 'currency', 'stocks', 'bonds', 'realestate', 'movable', 'crypto'];
+            const ACCOUNT_TYPE_ICONS = {
+                rubles: '💵',
+                deposit: '🏦',
+                currency: '💱',
+                stocks: '📈',
+                bonds: '📊',
+                realestate: '🏠',
+                movable: '🚗',
+                crypto: '₿',
+                debt: '🔻'
+            };
+            const ACCOUNT_TYPE_COLORS = {
+                rubles: '#00b894',
+                deposit: '#0984e3',
+                currency: '#6c5ce7',
+                stocks: '#fdcb6e',
+                bonds: '#e17055',
+                realestate: '#a29bfe',
+                movable: '#00cec9',
+                crypto: '#fd79a8',
+                debt: '#d63031'
+            };
+
+            function getAccountCategory(acc) {
+                if (acc.isDebt) return 'debt';
+                return acc.accountType || 'rubles';
+            }
+
             let currencyRates = { RUB: 1, USD: 90, EUR: 98, CNY: 0 };
 
             async function loadRates() {
@@ -995,6 +1090,7 @@
                     const data = JSON.parse(localRaw);
                     data.accounts.forEach(a => {
                         if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only';
+                        if (!a.isDebt && !a.accountType) a.accountType = 'rubles';
                     });
                     return data;
                 }
@@ -1008,9 +1104,9 @@
             function getDefaultData() {
                 return {
                     accounts: [
-                        { id: 'a1', name: 'Наличные', currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💵', isDebt: false, archived: false },
-                        { id: 'a2', name: 'Карта', currency: 'RUB', balance: 0, color: '#00b894', icon: '💳', isDebt: false, archived: false },
-                        { id: 'a3', name: 'Сбережения', currency: 'USD', balance: 0, color: '#fdcb6e', icon: '🏦', isDebt: false, archived: false },
+                        { id: 'a1', name: 'Наличные', currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💵', isDebt: false, archived: false, accountType: 'rubles' },
+                        { id: 'a2', name: 'Карта', currency: 'RUB', balance: 0, color: '#00b894', icon: '💳', isDebt: false, archived: false, accountType: 'rubles' },
+                        { id: 'a3', name: 'Сбережения', currency: 'USD', balance: 0, color: '#fdcb6e', icon: '🏦', isDebt: false, archived: false, accountType: 'currency' },
                     ],
                     categories: [
                         { id: 'c1', name: 'Зарплата', type: 'income', icon: '💰', color: '#00b894' },
@@ -1041,6 +1137,7 @@
             let hideAmounts = false;
             let showArchivedAccounts = false;
             let calendarDate = new Date();
+            let collapsedFolders = {};
 
             async function save() { 
                 recalcMonthlyBalances();
@@ -1176,6 +1273,7 @@
                 saveSettings(settings);
                 destroyCharts();
                 if (currentTab === 'stats') { renderStats(); renderMonthlyCharts(); }
+                if (currentTab === 'accounts') { renderAccounts(); }
             }
 
             document.getElementById('themeToggle').addEventListener('click', toggleTheme);
@@ -1204,6 +1302,10 @@
                         '<button class="btn btn-warning btn-sm" onclick="archiveAccount(\'' + acc.id + '\', false)">📤 Из архива</button>' :
                         '<button class="btn btn-outline btn-sm" onclick="archiveAccount(\'' + acc.id + '\', true)">📦 В архив</button>';
                 }
+                const currentType = acc?.accountType || 'rubles';
+                const typeOptions = ACCOUNT_TYPE_ORDER.map(k => 
+                    `<option value="${k}" ${currentType===k?'selected':''}>${ACCOUNT_TYPE_ICONS[k]||''} ${ACCOUNT_TYPES[k]}</option>`
+                ).join('');
                 let html = `
                 <h2>${title}</h2>
                 <div class="form-group"><label>Название</label><input id="accName" value="${acc?.name||''}"></div>
@@ -1218,8 +1320,12 @@
                 <div class="form-group"><label>Иконка</label><input id="accIcon" value="${acc?.icon||'💵'}" maxlength="2"></div>
                 <div class="form-group"><label>Начальный баланс</label><input type="number" id="accBalance" value="${acc?.balance||0}" step="0.01"></div>
                 <div class="checkbox-group">
-                  <input type="checkbox" id="accIsDebt" ${acc?.isDebt?'checked':''} onchange="document.getElementById('debtTypeGroup').style.display = this.checked ? 'block' : 'none'">
+                  <input type="checkbox" id="accIsDebt" ${acc?.isDebt?'checked':''} onchange="document.getElementById('debtTypeGroup').style.display = this.checked ? 'block' : 'none'; document.getElementById('accTypeGroup').style.display = this.checked ? 'none' : 'block';">
                   <label for="accIsDebt">Это долг / кредит</label>
+                </div>
+                <div class="form-group" id="accTypeGroup" style="display:${acc?.isDebt?'none':'block'};">
+                  <label>Категория счёта</label>
+                  <select id="accType">${typeOptions}</select>
                 </div>
                 <div class="form-group" id="debtTypeGroup" style="display:${acc?.isDebt?'block':'none'};">
                   <label>Тип учёта расходов</label>
@@ -1266,12 +1372,23 @@
                 const balance = parseFloat(document.getElementById('accBalance').value) || 0;
                 const isDebt = document.getElementById('accIsDebt').checked;
                 const debtType = document.getElementById('accDebtType')?.value || 'interest_only';
+                const accountType = isDebt ? undefined : (document.getElementById('accType')?.value || 'rubles');
                 if (!name) return alert('Введите название счёта');
                 if (editingId) {
                     const acc = getAccount(editingId);
-                    if (acc) { acc.name = name; acc.currency = currency; acc.color = color; acc.icon = icon; acc.balance = balance; acc.isDebt = isDebt; acc.debtType = isDebt ? debtType : undefined; }
+                    if (acc) {
+                        acc.name = name; acc.currency = currency; acc.color = color; acc.icon = icon;
+                        acc.balance = balance; acc.isDebt = isDebt;
+                        acc.debtType = isDebt ? debtType : undefined;
+                        acc.accountType = isDebt ? undefined : accountType;
+                    }
                 } else {
-                    appData.accounts.push({ id: genId(), name, currency, balance, color, icon, isDebt, archived: false, debtType: isDebt ? debtType : undefined });
+                    appData.accounts.push({
+                        id: genId(), name, currency, balance, color, icon, isDebt,
+                        archived: false,
+                        debtType: isDebt ? debtType : undefined,
+                        accountType: isDebt ? undefined : accountType
+                    });
                 }
                 save();
                 closeModal();
@@ -1882,8 +1999,11 @@
             function exportCSV() {
                 let csv = '';
                 csv += '[Счета]\n';
-                csv += 'Тип;Название;Валюта;Цвет;Иконка;Долг;Архив;ТипДолга\n';
-                appData.accounts.forEach(a => { csv += `Счёт;${a.name};${a.currency};${a.color};${a.icon};${a.isDebt};${a.archived};${a.isDebt ? (a.debtType||'interest_only') : ''}\n`; });
+                csv += 'Тип;Название;Валюта;Цвет;Иконка;Долг;Архив;ТипДолга;Категория\n';
+                appData.accounts.forEach(a => {
+                    const cat = a.isDebt ? 'debt' : (a.accountType || 'rubles');
+                    csv += `Счёт;${a.name};${a.currency};${a.color};${a.icon};${a.isDebt};${a.archived};${a.isDebt ? (a.debtType||'interest_only') : ''};${cat}\n`;
+                });
                 csv += '\n[Категории]\n';
                 csv += 'Тип;Название;Тип категории;Иконка;Цвет\n';
                 appData.categories.forEach(c => { csv += `Категория;${c.name};${c.type};${c.icon};${c.color}\n`; });
@@ -1942,8 +2062,16 @@
                         if (cols[0]?.trim().toLowerCase() === 'тип' && cols[1]?.trim().toLowerCase() === 'название') continue;
                         if (cols[0]?.trim().toLowerCase() === 'счёт') {
                             const name = cols[1]?.trim(), currency = cols[2]?.trim() || 'RUB', color = cols[3]?.trim() || '#6c5ce7', icon = cols[4]?.trim() || '💳', isDebt = cols[5]?.trim().toLowerCase() === 'true', archived = cols[6]?.trim().toLowerCase() === 'true', debtType = cols[7]?.trim() || (isDebt ? 'interest_only' : undefined);
+                            let accountType = cols[8]?.trim();
+                            if (!accountType) accountType = isDebt ? undefined : 'rubles';
+                            if (isDebt) accountType = undefined;
                             if (name && !appData.accounts.find(a => a.name === name)) {
-                                appData.accounts.push({ id: genId(), name, currency, balance: 0, color, icon, isDebt, archived: archived || false, debtType: isDebt ? debtType : undefined });
+                                appData.accounts.push({
+                                    id: genId(), name, currency, balance: 0, color, icon, isDebt,
+                                    archived: archived || false,
+                                    debtType: isDebt ? debtType : undefined,
+                                    accountType: isDebt ? undefined : accountType
+                                });
                                 importedAccounts++;
                             }
                         }
@@ -1976,7 +2104,7 @@
                             const tags = cols[11] ? cols[11].split(' ').filter(Boolean) : [];
                             let fromAcc = appData.accounts.find(a => a.name === fromName);
                             if (!fromAcc) {
-                                fromAcc = { id: genId(), name: fromName, currency: fromCurrency, balance: 0, color: '#6c5ce7', icon: '💳', isDebt: false, archived: false };
+                                fromAcc = { id: genId(), name: fromName, currency: fromCurrency, balance: 0, color: '#6c5ce7', icon: '💳', isDebt: false, archived: false, accountType: 'rubles' };
                                 appData.accounts.push(fromAcc);
                                 importedAccounts++;
                             }
@@ -2026,7 +2154,7 @@
                             const tags = cols[11] ? cols[11].split(' ').filter(Boolean) : [];
                             let account = appData.accounts.find(a => a.name === accountName);
                             if (!account) {
-                                account = { id: genId(), name: accountName, currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💳', isDebt: false, archived: false };
+                                account = { id: genId(), name: accountName, currency: 'RUB', balance: 0, color: '#6c5ce7', icon: '💳', isDebt: false, archived: false, accountType: 'rubles' };
                                 appData.accounts.push(account);
                                 importedAccounts++;
                             }
@@ -2532,13 +2660,11 @@
                 updateTransferForm();
             }
 
-            // ---------- Календарь на странице Обзор ----------
             window.changeCalendarMonth = function(delta) {
                 calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + delta, 1);
                 renderCalendar();
             };
 
-            // НОВОЕ: показ трат за выбранный день
             window.showDayTransactions = function(dateStr) {
                 const txs = [];
                 appData.transactions.forEach(tx => {
@@ -2738,15 +2864,134 @@
                 </div>`;
             }
 
+            window.toggleFolder = function(key) {
+                collapsedFolders[key] = !collapsedFolders[key];
+                renderAccounts();
+            };
+
             function renderAccounts() {
                 const accountsToShow = appData.accounts.filter(a => showArchivedAccounts ? a.archived : !a.archived);
-                document.getElementById('allAccounts').innerHTML = accountsToShow.length ? accountsToShow.map(a => `
-                <div class="account-card${a.archived?' archived':''}" onclick="showAccountModal('${a.id}')">
-                  <div class="acc-currency">${a.currency} ${a.isDebt ? '🔻' : ''} ${a.archived ? '📦' : ''}</div>
-                  <div class="acc-balance">${formatAmountHidden(a.balance, a.currency)}</div>
-                  <div class="acc-name">${a.icon} ${a.name} ${a.isDebt ? '(долг)' : ''}</div>
-                </div>`).join('') : '<div class="empty-state"><div class="icon">📭</div>Нет счетов</div>';
+
+                const groups = {};
+                accountsToShow.forEach(a => {
+                    const cat = getAccountCategory(a);
+                    if (!groups[cat]) groups[cat] = [];
+                    groups[cat].push(a);
+                });
+
+                const order = ['debt', ...ACCOUNT_TYPE_ORDER];
+
+                let html = '';
+                let anyFolder = false;
+
+                order.forEach(key => {
+                    const accs = groups[key];
+                    if (!accs || accs.length === 0) return;
+                    anyFolder = true;
+                    const title = key === 'debt' ? 'Долговые счета' : (ACCOUNT_TYPES[key] || key);
+                    const icon = ACCOUNT_TYPE_ICONS[key] || '📁';
+                    const totalRub = accs.reduce((s, a) => s + convertCurrency(a.balance, a.currency, 'RUB'), 0);
+                    const collapsed = !!collapsedFolders[key];
+
+                    html += `
+                        <div class="account-folder">
+                            <div class="folder-header" onclick="toggleFolder('${key}')">
+                                <span class="folder-icon">${icon}</span>
+                                <span class="folder-title">${title} <span style="color:var(--text2);font-weight:500;">(${accs.length})</span></span>
+                                <span class="folder-sum">${formatAmountHidden(totalRub, 'RUB', true)}</span>
+                                <span class="folder-chevron${collapsed ? ' collapsed' : ''}">▼</span>
+                            </div>
+                            <div class="folder-content${collapsed ? ' hidden' : ''}">
+                                <div class="accounts-grid" style="margin-top:12px;">
+                                    ${accs.map(a => `
+                                        <div class="account-card${a.archived?' archived':''}" onclick="showAccountModal('${a.id}')">
+                                            <div class="acc-currency">${a.currency} ${a.isDebt ? '🔻' : ''} ${a.archived ? '📦' : ''}</div>
+                                            <div class="acc-balance">${formatAmountHidden(a.balance, a.currency)}</div>
+                                            <div class="acc-name">${a.icon} ${a.name} ${a.isDebt ? '(долг)' : ''}</div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('allAccounts').innerHTML = anyFolder ? html : '<div class="empty-state"><div class="icon">📭</div>Нет счетов</div>';
                 updateAccountSelects();
+                renderAccountsDistribution(accountsToShow);
+            }
+
+            // ИЗМЕНЕНО: долговые счета исключены из диаграммы и таблицы распределения
+            function renderAccountsDistribution(accountsToShow) {
+                const accs = (accountsToShow || appData.accounts.filter(a => !a.archived)).filter(a => !a.isDebt);
+
+                const categories = {};
+                ACCOUNT_TYPE_ORDER.forEach(k => { categories[k] = 0; });
+                accs.forEach(a => {
+                    const cat = a.accountType || 'rubles';
+                    const rub = convertCurrency(a.balance, a.currency, 'RUB');
+                    categories[cat] = (categories[cat] || 0) + rub;
+                });
+
+                const labels = {
+                    rubles: 'Рубли', deposit: 'Вклад', currency: 'Валюта',
+                    stocks: 'Акции', bonds: 'Облигации', realestate: 'Недвижимость',
+                    movable: 'Движимость', crypto: 'Криптовалюта'
+                };
+
+                const filtered = ACCOUNT_TYPE_ORDER.filter(k => categories[k] > 0);
+                const values = filtered.map(k => categories[k]);
+                const labelsArr = filtered.map(k => labels[k]);
+                const colors = filtered.map(k => ACCOUNT_TYPE_COLORS[k] || '#6c5ce7');
+
+                if (charts.accountsDistributionChart) {
+                    charts.accountsDistributionChart.destroy();
+                    delete charts.accountsDistributionChart;
+                }
+
+                const surfaceColor = getComputedStyle(document.body).getPropertyValue('--surface').trim() || '#fff';
+                const canvas = document.getElementById('accountsDistributionChart');
+
+                if (values.length && canvas) {
+                    charts.accountsDistributionChart = new Chart(canvas, {
+                        type: 'doughnut',
+                        data: {
+                            labels: labelsArr,
+                            datasets: [{
+                                data: values,
+                                backgroundColor: colors,
+                                borderWidth: 2,
+                                borderColor: surfaceColor
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } }
+                        }
+                    });
+                }
+
+                const total = values.reduce((s, v) => s + v, 0);
+                let tableHtml = '';
+                if (filtered.length) {
+                    tableHtml = `
+                        <div style="font-weight:600; margin-bottom:8px;">Всего: ${formatAmountHidden(total, 'RUB', true)}</div>
+                        ${filtered.map((k, i) => {
+                            const val = categories[k];
+                            const pct = total > 0 ? Math.round((val / total) * 100) : 0;
+                            return `
+                                <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border);">
+                                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${colors[i]};margin-right:8px;"></span>${ACCOUNT_TYPE_ICONS[k]||''} ${labels[k]}</span>
+                                    <span style="font-weight:600;">${formatAmountHidden(val, 'RUB', true)} <span style="color:var(--text2); font-size:0.8rem;">${pct}%</span></span>
+                                </div>
+                            `;
+                        }).join('')}
+                    `;
+                } else {
+                    tableHtml = '<div class="empty-state">Нет данных</div>';
+                }
+                document.getElementById('accountsDistributionTable').innerHTML = tableHtml;
             }
 
             function renderTransactions() {
@@ -2811,7 +3056,11 @@
                 await loadRates();
                 appData = await loadData();
                 if (!appData.monthlyBalances) appData.monthlyBalances = [];
-                appData.accounts.forEach(a => { if (a.archived === undefined) a.archived = false; if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only'; });
+                appData.accounts.forEach(a => {
+                    if (a.archived === undefined) a.archived = false;
+                    if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only';
+                    if (!a.isDebt && !a.accountType) a.accountType = 'rubles';
+                });
                 appData.transactions.forEach(tx => { if (tx.excluded === undefined) tx.excluded = false; });
                 recalcMonthlyBalances();
                 processRecurring();
@@ -2863,6 +3112,7 @@
             window.recalcDebtFieldsEdit = recalcDebtFieldsEdit;
             window.changeCalendarMonth = changeCalendarMonth;
             window.showDayTransactions = showDayTransactions;
+            window.toggleFolder = toggleFolder;
 
             init();
         })();
