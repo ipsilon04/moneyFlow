@@ -610,10 +610,20 @@
             align-items: center;
             justify-content: flex-start;
             transition: all var(--transition);
+            cursor: pointer;
+        }
+        .cal-cell:hover {
+            border-color: var(--accent2);
+            transform: translateY(-1px);
         }
         .cal-cell.empty {
             border-color: transparent;
             background: transparent;
+            cursor: default;
+        }
+        .cal-cell.empty:hover {
+            transform: none;
+            border-color: transparent;
         }
         .cal-day {
             font-size: 0.75rem;
@@ -1111,7 +1121,6 @@
             function getAccount(id) { return appData.accounts.find(a => a.id === id); }
             function getCategory(id) { return appData.categories.find(c => c.id === id); }
 
-            // ИЗМЕНЕНО: игнорируем транзакции, у которых excluded = true
             function getTransactionsInRange(start, end, accountId = 'all', inclusiveEnd = true) {
                 return appData.transactions.filter(tx => {
                     if (tx.type !== 'income' && tx.type !== 'expense') return false;
@@ -1123,7 +1132,6 @@
                 });
             }
 
-            // ИЗМЕНЕНО: игнорируем переводы с excluded = true
             function getDebtExpensesInRange(start, end, accountId, inclusiveEnd) {
                 return appData.transactions.filter(tx => {
                     if (tx.type !== 'transfer') return false;
@@ -2385,7 +2393,6 @@
                 };
             }
 
-            // ИЗМЕНЕНО: убран переключатель типа графика. Баланс всегда линия, остальные — столбцы.
             function renderMonthlyCharts() {
                 destroyCharts(['balanceMonthlyChart', 'incomeMonthlyChart', 'expenseMonthlyChart', 'monthlyChangeChart']);
                 const accountId = document.getElementById('statsAccount')?.value || 'all';
@@ -2429,7 +2436,6 @@
                     };
                 };
 
-                // График общего баланса — всегда линия
                 if (balanceLabels.length) {
                     charts.balanceMonthlyChart = new Chart(document.getElementById('balanceMonthlyChart'), {
                         type: 'line',
@@ -2532,6 +2538,46 @@
                 renderCalendar();
             };
 
+            // НОВОЕ: показ трат за выбранный день
+            window.showDayTransactions = function(dateStr) {
+                const txs = [];
+                appData.transactions.forEach(tx => {
+                    if (tx.date !== dateStr) return;
+                    if (tx.type === 'expense') {
+                        if (tx.excluded) return;
+                        txs.push(tx);
+                    } else if (tx.type === 'transfer') {
+                        if (tx.excluded) return;
+                        const toAcc = getAccount(tx.transferTo);
+                        const fromAcc = getAccount(tx.transferFrom);
+                        if (toAcc && toAcc.isDebt && fromAcc && !fromAcc.isDebt) {
+                            const exp = toAcc.debtType === 'full_payment' ? (tx.amount || 0) : (tx.interest || 0);
+                            if (exp > 0) txs.push(tx);
+                        }
+                    }
+                });
+                txs.sort((a,b) => b.id.localeCompare(a.id));
+                const total = txs.reduce((s, tx) => {
+                    if (tx.type === 'transfer') {
+                        const toAcc = getAccount(tx.transferTo);
+                        return s + (toAcc.debtType === 'full_payment' ? tx.amount : (tx.interest || 0));
+                    }
+                    return s + tx.amount;
+                }, 0);
+                const d = new Date(dateStr);
+                const monthNames = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+                const titleDate = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+                const html = `
+                    <h2>Траты за ${titleDate}</h2>
+                    <div style="margin-bottom:12px; font-weight:600;">Всего: ${formatAmountHidden(total, 'RUB')}</div>
+                    <div style="max-height:60vh; overflow-y:auto;">
+                        ${txs.length ? txs.map(tx => renderTxItem(tx)).join('') : '<div class="empty-state">Нет трат в этот день</div>'}
+                    </div>
+                    <button class="btn btn-outline btn-sm" onclick="closeModal()" style="margin-top:12px;">Закрыть</button>
+                `;
+                showModal(html);
+            };
+
             function renderCalendar() {
                 const year = calendarDate.getFullYear();
                 const month = calendarDate.getMonth();
@@ -2542,7 +2588,7 @@
                 const firstDay = new Date(year, month, 1);
                 const lastDay = new Date(year, month + 1, 0);
                 const daysInMonth = lastDay.getDate();
-                const startWeekday = (firstDay.getDay() + 6) % 7; // 0 = Пн
+                const startWeekday = (firstDay.getDay() + 6) % 7;
                 const monthStart = formatLocalDate(firstDay);
                 const monthEnd = formatLocalDate(lastDay);
 
@@ -2575,7 +2621,7 @@
                     const isWeekend = weekday >= 5;
                     const sumStr = sum > 0 ? (hideAmounts ? '***' : Math.round(sum).toLocaleString('ru-RU')) : '';
                     html += `
-                        <div class="cal-cell${isToday ? ' today' : ''}">
+                        <div class="cal-cell${isToday ? ' today' : ''}" onclick="showDayTransactions('${dayStr}')">
                             <div class="cal-day${isWeekend && !isToday ? ' weekend' : ''}">${d}</div>
                             ${sum > 0 ? `<div class="cal-sum">${sumStr}</div>` : ''}
                         </div>`;
@@ -2816,6 +2862,7 @@
             window.recalcDebtFields = recalcDebtFields;
             window.recalcDebtFieldsEdit = recalcDebtFieldsEdit;
             window.changeCalendarMonth = changeCalendarMonth;
+            window.showDayTransactions = showDayTransactions;
 
             init();
         })();
