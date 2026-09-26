@@ -1026,43 +1026,81 @@
             const SETTINGS_KEY = 'moneyflow_settings';
             const RATES_KEY = 'moneyflow_rates';
 
+            // Категории (типы) недолговых счетов
             const ACCOUNT_TYPES = {
                 rubles: 'Рубли',
                 deposit: 'Вклад',
                 currency: 'Валюта',
-                stocks: 'Акции',
-                bonds: 'Облигации',
+                broker: 'БС',
+                metals: 'Металлы',
+                crypto: 'Криптовалюта',
                 realestate: 'Недвижимость',
-                movable: 'Движимость',
-                crypto: 'Криптовалюта'
+                movable: 'Движимость'
             };
-            const ACCOUNT_TYPE_ORDER = ['rubles', 'deposit', 'currency', 'stocks', 'bonds', 'realestate', 'movable', 'crypto'];
+            const ACCOUNT_TYPE_ORDER = ['rubles', 'deposit', 'currency', 'broker', 'metals', 'crypto', 'realestate', 'movable'];
+
             const ACCOUNT_TYPE_ICONS = {
                 rubles: '💵',
                 deposit: '🏦',
                 currency: '💱',
-                stocks: '📈',
-                bonds: '📊',
+                broker: '📈',
+                metals: '🥇',
+                crypto: '₿',
                 realestate: '🏠',
                 movable: '🚗',
-                crypto: '₿',
                 debt: '🔻'
             };
             const ACCOUNT_TYPE_COLORS = {
                 rubles: '#00b894',
                 deposit: '#0984e3',
                 currency: '#6c5ce7',
-                stocks: '#fdcb6e',
-                bonds: '#e17055',
+                broker: '#fdcb6e',
+                metals: '#e17055',
+                crypto: '#fd79a8',
                 realestate: '#a29bfe',
                 movable: '#00cec9',
-                crypto: '#fd79a8',
                 debt: '#d63031'
             };
+
+            // Группировка в папки: объединяем БС+Криптовалюта и Недвижимость+Движимость
+            const FOLDER_TITLES = {
+                debt: 'Долговые счета',
+                rubles: 'Рубли',
+                deposit: 'Вклад',
+                currency: 'Валюта',
+                broker_crypto: 'БС и Криптовалюта',
+                metals: 'Металлы',
+                property: 'Недвижимость и Движимость'
+            };
+            const FOLDER_ICONS = {
+                debt: '🔻',
+                rubles: '💵',
+                deposit: '🏦',
+                currency: '💱',
+                broker_crypto: '📈',
+                metals: '🥇',
+                property: '🏠'
+            };
+            const FOLDER_ORDER = ['debt', 'rubles', 'deposit', 'currency', 'broker_crypto', 'metals', 'property'];
 
             function getAccountCategory(acc) {
                 if (acc.isDebt) return 'debt';
                 return acc.accountType || 'rubles';
+            }
+
+            function getAccountFolderKey(acc) {
+                if (acc.isDebt) return 'debt';
+                const type = acc.accountType || 'rubles';
+                if (type === 'broker' || type === 'crypto') return 'broker_crypto';
+                if (type === 'realestate' || type === 'movable') return 'property';
+                if (FOLDER_TITLES[type]) return type;
+                return 'rubles';
+            }
+
+            // Миграция старых типов: stocks/bonds → broker
+            function migrateAccountType(type) {
+                if (type === 'stocks' || type === 'bonds') return 'broker';
+                return type;
             }
 
             let currencyRates = { RUB: 1, USD: 90, EUR: 98, CNY: 0 };
@@ -1090,7 +1128,11 @@
                     const data = JSON.parse(localRaw);
                     data.accounts.forEach(a => {
                         if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only';
-                        if (!a.isDebt && !a.accountType) a.accountType = 'rubles';
+                        if (!a.isDebt) {
+                            if (!a.accountType) a.accountType = 'rubles';
+                            else a.accountType = migrateAccountType(a.accountType);
+                            if (ACCOUNT_TYPE_ORDER.indexOf(a.accountType) === -1) a.accountType = 'rubles';
+                        }
                     });
                     return data;
                 }
@@ -1137,7 +1179,8 @@
             let hideAmounts = false;
             let showArchivedAccounts = false;
             let calendarDate = new Date();
-            let collapsedFolders = {};
+            // По умолчанию все папки свёрнуты. expandedFolders[key] === true означает, что папка развёрнута.
+            let expandedFolders = {};
 
             async function save() { 
                 recalcMonthlyBalances();
@@ -1302,7 +1345,7 @@
                         '<button class="btn btn-warning btn-sm" onclick="archiveAccount(\'' + acc.id + '\', false)">📤 Из архива</button>' :
                         '<button class="btn btn-outline btn-sm" onclick="archiveAccount(\'' + acc.id + '\', true)">📦 В архив</button>';
                 }
-                const currentType = acc?.accountType || 'rubles';
+                const currentType = (acc && acc.accountType) ? acc.accountType : 'rubles';
                 const typeOptions = ACCOUNT_TYPE_ORDER.map(k => 
                     `<option value="${k}" ${currentType===k?'selected':''}>${ACCOUNT_TYPE_ICONS[k]||''} ${ACCOUNT_TYPES[k]}</option>`
                 ).join('');
@@ -2065,6 +2108,10 @@
                             let accountType = cols[8]?.trim();
                             if (!accountType) accountType = isDebt ? undefined : 'rubles';
                             if (isDebt) accountType = undefined;
+                            else {
+                                accountType = migrateAccountType(accountType);
+                                if (ACCOUNT_TYPE_ORDER.indexOf(accountType) === -1) accountType = 'rubles';
+                            }
                             if (name && !appData.accounts.find(a => a.name === name)) {
                                 appData.accounts.push({
                                     id: genId(), name, currency, balance: 0, color, icon, isDebt,
@@ -2864,34 +2911,36 @@
                 </div>`;
             }
 
+            // ИЗМЕНЕНО: теперь expandedFolders. По умолчанию все папки свёрнуты.
             window.toggleFolder = function(key) {
-                collapsedFolders[key] = !collapsedFolders[key];
+                expandedFolders[key] = !expandedFolders[key];
                 renderAccounts();
             };
 
             function renderAccounts() {
                 const accountsToShow = appData.accounts.filter(a => showArchivedAccounts ? a.archived : !a.archived);
 
+                // Группировка по папкам (объединённые группы)
                 const groups = {};
                 accountsToShow.forEach(a => {
-                    const cat = getAccountCategory(a);
-                    if (!groups[cat]) groups[cat] = [];
-                    groups[cat].push(a);
+                    const folderKey = getAccountFolderKey(a);
+                    if (!groups[folderKey]) groups[folderKey] = [];
+                    groups[folderKey].push(a);
                 });
-
-                const order = ['debt', ...ACCOUNT_TYPE_ORDER];
 
                 let html = '';
                 let anyFolder = false;
 
-                order.forEach(key => {
+                FOLDER_ORDER.forEach(key => {
                     const accs = groups[key];
                     if (!accs || accs.length === 0) return;
                     anyFolder = true;
-                    const title = key === 'debt' ? 'Долговые счета' : (ACCOUNT_TYPES[key] || key);
-                    const icon = ACCOUNT_TYPE_ICONS[key] || '📁';
+                    const title = FOLDER_TITLES[key] || key;
+                    const icon = FOLDER_ICONS[key] || '📁';
                     const totalRub = accs.reduce((s, a) => s + convertCurrency(a.balance, a.currency, 'RUB'), 0);
-                    const collapsed = !!collapsedFolders[key];
+                    // По умолчанию папка свёрнута: развёрнута только если expandedFolders[key] === true
+                    const isExpanded = expandedFolders[key] === true;
+                    const collapsed = !isExpanded;
 
                     html += `
                         <div class="account-folder">
@@ -2921,7 +2970,7 @@
                 renderAccountsDistribution(accountsToShow);
             }
 
-            // ИЗМЕНЕНО: долговые счета исключены из диаграммы и таблицы распределения
+            // Долговые счета исключены из диаграммы и таблицы распределения
             function renderAccountsDistribution(accountsToShow) {
                 const accs = (accountsToShow || appData.accounts.filter(a => !a.archived)).filter(a => !a.isDebt);
 
@@ -2933,15 +2982,9 @@
                     categories[cat] = (categories[cat] || 0) + rub;
                 });
 
-                const labels = {
-                    rubles: 'Рубли', deposit: 'Вклад', currency: 'Валюта',
-                    stocks: 'Акции', bonds: 'Облигации', realestate: 'Недвижимость',
-                    movable: 'Движимость', crypto: 'Криптовалюта'
-                };
-
                 const filtered = ACCOUNT_TYPE_ORDER.filter(k => categories[k] > 0);
                 const values = filtered.map(k => categories[k]);
-                const labelsArr = filtered.map(k => labels[k]);
+                const labelsArr = filtered.map(k => ACCOUNT_TYPES[k]);
                 const colors = filtered.map(k => ACCOUNT_TYPE_COLORS[k] || '#6c5ce7');
 
                 if (charts.accountsDistributionChart) {
@@ -2982,7 +3025,7 @@
                             const pct = total > 0 ? Math.round((val / total) * 100) : 0;
                             return `
                                 <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border);">
-                                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${colors[i]};margin-right:8px;"></span>${ACCOUNT_TYPE_ICONS[k]||''} ${labels[k]}</span>
+                                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${colors[i]};margin-right:8px;"></span>${ACCOUNT_TYPE_ICONS[k]||''} ${ACCOUNT_TYPES[k]}</span>
                                     <span style="font-weight:600;">${formatAmountHidden(val, 'RUB', true)} <span style="color:var(--text2); font-size:0.8rem;">${pct}%</span></span>
                                 </div>
                             `;
@@ -3059,7 +3102,11 @@
                 appData.accounts.forEach(a => {
                     if (a.archived === undefined) a.archived = false;
                     if (a.isDebt && a.debtType === undefined) a.debtType = 'interest_only';
-                    if (!a.isDebt && !a.accountType) a.accountType = 'rubles';
+                    if (!a.isDebt) {
+                        if (!a.accountType) a.accountType = 'rubles';
+                        else a.accountType = migrateAccountType(a.accountType);
+                        if (ACCOUNT_TYPE_ORDER.indexOf(a.accountType) === -1) a.accountType = 'rubles';
+                    }
                 });
                 appData.transactions.forEach(tx => { if (tx.excluded === undefined) tx.excluded = false; });
                 recalcMonthlyBalances();
